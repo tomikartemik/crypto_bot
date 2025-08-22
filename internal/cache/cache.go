@@ -26,9 +26,10 @@ var (
 func Get() *Cache {
 	once.Do(func() {
 		instance = &Cache{
-			prices:     make(map[string]float64),
-			lotSizes:   make(map[string]float64),
-			indicators: make(map[string]map[string]IndicatorData),
+			prices:         make(map[string]float64),
+			lotSizes:       make(map[string]float64),
+			indicators:     make(map[string]map[string]IndicatorData),
+			contractValues: make(map[string]float64),
 		}
 	})
 	return instance
