@@ -1,15 +1,15 @@
 {
     "base_url": "https://www.okx.com",
-    "trading_pairs": ["ETH-USDT-SWAP", "BTC-USDT-SWAP", "SOL-USDT-SWAP", "ADA-USDT-SWAP", "LTC-USDT-SWAP"],
+    "candles_amount": 200,
     "atr_period": 10,
-    "atr_multiplier_trailing": 2.5,
-    "atr_multiplier_stop_loss": 1.5,
     "multiplier": 3.0,
     "min_order_size": 0.0,
-    "timeframes": ["15m"],
-    "candles_amount": 200,
-    "risk_percent": 0.2,
     "ccy": "USDT",
-    "is_simulated": true,
+    "is_simulated": false,
+    "trading_pairs": ["ETH-USDT-SWAP", "BTC-USDT-SWAP", "SOL-USDT-SWAP", "ADA-USDT-SWAP", "LTC-USDT-SWAP"],
+    "atr_multiplier_trailing": 2.0,
+    "atr_multiplier_stop_loss": 1.5,
+    "timeframes": ["15m"], 
+    "risk_percent": 0.2,
     "leverage": 5
 }

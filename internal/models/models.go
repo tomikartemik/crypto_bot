@@ -24,7 +24,7 @@ type Position struct {
 
 func (p Position) String() string {
 	return fmt.Sprintf(
-		"Инструмент: %s | Позиция: %s | Размер: %.4f | Цена входа: %.2f | Стоп-лосс: %.2f (%.2f%%)",
+		"Инструмент: %s | Позиция: %s | Размер: %.4f | Цена входа: %.4f | Стоп-лосс: %.4f (%.4f%%)",
 		p.InstId,
 		strings.ToUpper(p.PosSide), // "short" -> "SHORT", "long" -> "LONG"
 		p.TradeSize,

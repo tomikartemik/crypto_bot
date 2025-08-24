@@ -2,7 +2,9 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
@@ -64,12 +66,17 @@ func (b *Bot) Run(ctx context.Context) {
 		}
 	}
 
+	interval, err := parseTimeframe(configs.BotCurrentConfig.Timeframes[0])
+	if err != nil {
+		log.Fatalf("failed to parse timeframe %s: %v", configs.BotCurrentConfig.Timeframes[0], err)
+	}
+
 	now := time.Now()
-	next5Min := now.Truncate(15 * time.Minute).Add(15 * time.Minute)
+	next5Min := now.Truncate(interval).Add(interval)
 	initialDelay := next5Min.Sub(now)
 	time.Sleep(initialDelay)
 
-	go b.strategyUpdater(ctx, 15*time.Minute, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
+	go b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	for _, t := range b.traders {
 		go t.Run(ctx)
@@ -79,5 +86,24 @@ func (b *Bot) Run(ctx context.Context) {
 func (b *Bot) Stop() {
 	for _, t := range b.traders {
 		t.Stop()
+	}
+}
+
+func parseTimeframe(tf string) (time.Duration, error) {
+	unit := tf[len(tf)-1]   // последняя буква (m или h)
+	value := tf[:len(tf)-1] // всё кроме последней
+
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+
+	switch unit {
+	case 'm', 'M':
+		return time.Duration(n) * time.Minute, nil
+	case 'h', 'H':
+		return time.Duration(n) * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unsupported timeframe: %s", tf)
 	}
 }
