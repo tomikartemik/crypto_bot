@@ -3,6 +3,7 @@ package okx
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -37,7 +38,7 @@ func (c *Client) PlaceOrder(instId, side, posSide string, size float64) error {
 
 	// размер позиции в контрактах, так как мы на фьючах
 	contracts := size / ctVal
-	sz := int(math.Floor(contracts))
+	sz := int(math.Floor(contracts)) * configs.BotCurrentConfig.Leverage
 	if sz <= 0 {
 		return fmt.Errorf("размер позиции меньше 1 контракта")
 	}
@@ -74,6 +75,46 @@ func (c *Client) PlaceOrder(instId, side, posSide string, size float64) error {
 	}
 	defer resp.Body.Close()
 
+	return nil
+}
+
+func (c *Client) SetLeverage(instId string) error {
+	for _, posSide := range []string{"long", "short"} {
+		timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+		requestPath := "/api/v5/account/set-leverage"
+		fullURL := configs.BotCurrentConfig.BaseURL + requestPath
+
+		body := fmt.Sprintf(`{
+			"instId":"%s",
+			"lever":"%d",
+			"posSide":"%s",
+			"mgnMode":"isolated"
+		}`, instId, configs.BotCurrentConfig.Leverage, posSide)
+
+		req, _ := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(body)))
+		sign := signRequest("POST", requestPath, body, timestamp, c.apiSecret)
+
+		req.Header.Set("OK-ACCESS-KEY", c.apiKey)
+		req.Header.Set("OK-ACCESS-SIGN", sign)
+		req.Header.Set("OK-ACCESS-TIMESTAMP", timestamp)
+		req.Header.Set("OK-ACCESS-PASSPHRASE", c.passphrase)
+		req.Header.Set("Content-Type", "application/json")
+		if configs.BotCurrentConfig.IsSimulated {
+			req.Header.Set("x-simulated-trading", "1")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("ошибка при выставлении плеча для %s %s: %w", instId, posSide, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			b, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("плечо не установлено для %s %s, статус %d, ответ: %s",
+				instId, posSide, resp.StatusCode, string(b))
+		}
+	}
 	return nil
 }
 

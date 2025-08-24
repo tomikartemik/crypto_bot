@@ -2,7 +2,7 @@
     "base_url": "https://www.okx.com",
     "trading_pairs": ["ETH-USDT-SWAP", "BTC-USDT-SWAP", "SOL-USDT-SWAP", "ADA-USDT-SWAP", "LTC-USDT-SWAP"],
     "atr_period": 10,
-    "atr_multiplier_trailing": 1.5,
+    "atr_multiplier_trailing": 2.5,
     "atr_multiplier_stop_loss": 1.5,
     "multiplier": 3.0,
     "min_order_size": 0.0,

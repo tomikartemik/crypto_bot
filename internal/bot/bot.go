@@ -58,6 +58,10 @@ func (b *Bot) Run(ctx context.Context) {
 		if err == nil {
 			cache.Get().SetContractValue(inst, ctVal)
 		}
+
+		for _, trader := range b.traders {
+			trader.Client.SetLeverage(inst)
+		}
 	}
 
 	now := time.Now()
@@ -65,7 +69,7 @@ func (b *Bot) Run(ctx context.Context) {
 	initialDelay := next5Min.Sub(now)
 	time.Sleep(initialDelay)
 
-	go b.strategyUpdater(ctx, 5*time.Minute, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
+	go b.strategyUpdater(ctx, 15*time.Minute, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	for _, t := range b.traders {
 		go t.Run(ctx)
