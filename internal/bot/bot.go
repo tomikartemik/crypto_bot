@@ -2,9 +2,7 @@ package bot
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
@@ -12,6 +10,7 @@ import (
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger"
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger/okx"
 	"github.com/kuromii5/supertrend_trade_bot/internal/trader"
+	"github.com/kuromii5/supertrend_trade_bot/internal/utils"
 )
 
 type Bot struct {
@@ -66,7 +65,7 @@ func (b *Bot) Run(ctx context.Context) {
 		}
 	}
 
-	interval, err := parseTimeframe(configs.BotCurrentConfig.Timeframes[0])
+	interval, err := utils.ParseTimeframe(configs.BotCurrentConfig.Timeframes[0])
 	if err != nil {
 		log.Fatalf("failed to parse timeframe %s: %v", configs.BotCurrentConfig.Timeframes[0], err)
 	}
@@ -86,24 +85,5 @@ func (b *Bot) Run(ctx context.Context) {
 func (b *Bot) Stop() {
 	for _, t := range b.traders {
 		t.Stop()
-	}
-}
-
-func parseTimeframe(tf string) (time.Duration, error) {
-	unit := tf[len(tf)-1]   // последняя буква (m или h)
-	value := tf[:len(tf)-1] // всё кроме последней
-
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, err
-	}
-
-	switch unit {
-	case 'm', 'M':
-		return time.Duration(n) * time.Minute, nil
-	case 'h', 'H':
-		return time.Duration(n) * time.Hour, nil
-	default:
-		return 0, fmt.Errorf("unsupported timeframe: %s", tf)
 	}
 }
