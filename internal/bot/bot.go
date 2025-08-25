@@ -71,14 +71,14 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 
 	now := time.Now()
-	next5Min := now.Truncate(interval).Add(interval)
-	initialDelay := next5Min.Sub(now)
+	nextInterval := now.Truncate(interval).Add(interval)
+	initialDelay := nextInterval.Sub(now)
 	time.Sleep(initialDelay)
 
 	go b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	for _, t := range b.traders {
-		go t.Run(ctx)
+		go t.Run(ctx, interval)
 	}
 }
 

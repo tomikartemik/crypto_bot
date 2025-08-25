@@ -40,11 +40,11 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 	}
 }
 
-func (t *Trader) Run(ctx context.Context) {
-	tickerTrade := time.NewTicker(15 * time.Minute)
+func (t *Trader) Run(ctx context.Context, interval time.Duration) {
+	tickerTrade := time.NewTicker(interval)
 	defer tickerTrade.Stop()
 
-	tickerTrailing := time.NewTicker(15 * time.Second)
+	tickerTrailing := time.NewTicker(10 * time.Second)
 	defer tickerTrailing.Stop()
 
 	// ждем смену тренда на всех монетах
