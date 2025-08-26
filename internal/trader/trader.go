@@ -102,20 +102,28 @@ func (t *Trader) trade() {
 
 			switch tfIsUptrend {
 			case true: // Аптренд - Закрываем SHORT, Открываем LONG
-				if err = t.Client.PlaceOrder(instId, "buy", "short", t.positions[instId].TradeSize); err == nil {
+				if err = t.Client.PlaceOrder(instId, "buy", "short", t.positions[instId].TradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при закрытии SHORT: %v", t.cfg.APIKey, instId, err)
+				} else {
 					log.Printf("[Trader %s][%s] Закрыт SHORT, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
 				}
 
-				if err = t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err == nil {
+				if err = t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
+				} else {
 					t.positions[instId] = models.Position{InstId: instId, PosSide: "long", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 0.992}
 					log.Printf("[Trader %s][%s] Открыт LONG, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
 				}
 			case false: // Даунтренд - Закрываем LONG, Открываем SHORT
-				if err = t.Client.PlaceOrder(instId, "sell", "long", t.positions[instId].TradeSize); err == nil {
+				if err = t.Client.PlaceOrder(instId, "sell", "long", t.positions[instId].TradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при закрытии LONG: %v", t.cfg.APIKey, instId, err)
+				} else {
 					log.Printf("[Trader %s][%s] Закрыт LONG, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
 				}
 
-				if err = t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err == nil {
+				if err = t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
+				} else {
 					t.positions[instId] = models.Position{InstId: instId, PosSide: "short", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 1.008}
 					log.Printf("[Trader %s][%s] Открыт SHORT, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
 				}
@@ -129,12 +137,16 @@ func (t *Trader) trade() {
 
 			switch tfIsUptrend {
 			case true: // Аптренд - входим в лонг
-				if err = t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err == nil {
+				if err = t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
+				} else {
 					t.positions[instId] = models.Position{InstId: instId, PosSide: "long", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 0.992}
 					log.Printf("[Trader %s][%s] Открыт LONG, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
 				}
 			case false: // Даунтренд - входим в шорт
-				if err = t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err == nil {
+				if err = t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
+				} else {
 					t.positions[instId] = models.Position{InstId: instId, PosSide: "short", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 1.008}
 					log.Printf("[Trader %s][%s] Открыт SHORT, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
 				}
