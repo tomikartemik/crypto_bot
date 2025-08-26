@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
@@ -36,11 +37,20 @@ func (c *Client) PlaceOrder(instId, side, posSide string, size float64) error {
 		return fmt.Errorf("не найден contract value для %s", instId)
 	}
 
-	// размер позиции в контрактах, так как мы на фьючах
+	// размер позиции в контрактах
 	contracts := size / ctVal
-	sz := int(math.Floor(contracts)) * configs.BotCurrentConfig.Leverage
-	if sz <= 0 {
-		return fmt.Errorf("размер позиции меньше 1 контракта")
+	lotSz, ok := cache.Get().GetLotSize(instId)
+	if !ok || lotSz == 0 {
+		return fmt.Errorf("не найден lot size для %s", instId)
+	}
+
+	// округляем по шагу lotSz
+	precision := utils.CountDecimals(lotSz)
+	format := "%." + strconv.Itoa(precision) + "f"
+	sz := fmt.Sprintf(format, math.Floor(contracts/lotSz)*lotSz)
+
+	if sz == "0" || sz == "0.0" {
+		return fmt.Errorf("размер позиции меньше минимального lotSz")
 	}
 
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
