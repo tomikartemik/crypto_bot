@@ -204,7 +204,7 @@ func (c *MarketClient) GetLotSize(instId string) (float64, error) {
 
 	var result struct {
 		Data []struct {
-			LotSize string `json:"lotSz"`
+			MinSize string `json:"minSz"`
 		} `json:"data"`
 	}
 
@@ -212,11 +212,11 @@ func (c *MarketClient) GetLotSize(instId string) (float64, error) {
 		return 0, err
 	}
 
-	if len(result.Data) == 0 || result.Data[0].LotSize == "" {
+	if len(result.Data) == 0 || result.Data[0].MinSize == "" {
 		return 0, fmt.Errorf("lot size not found")
 	}
 
-	return strconv.ParseFloat(result.Data[0].LotSize, 64)
+	return strconv.ParseFloat(result.Data[0].MinSize, 64)
 }
 
 func (c *MarketClient) GetContractValue(instId string) (float64, error) {
