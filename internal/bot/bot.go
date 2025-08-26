@@ -50,14 +50,10 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 
 	for _, inst := range configs.BotCurrentConfig.TradingPairs {
-		lot, err := b.client.GetLotSize(inst)
+		instInfo, err := b.client.GetInstrumentInfo(inst)
 		if err == nil {
-			cache.Get().SetLotSize(inst, lot)
-		}
-
-		ctVal, err := b.client.GetContractValue(inst)
-		if err == nil {
-			cache.Get().SetContractValue(inst, ctVal)
+			cache.Get().SetLotSize(inst, instInfo.MinSize)
+			cache.Get().SetContractValue(inst, instInfo.CtVal)
 		}
 
 		for _, trader := range b.traders {

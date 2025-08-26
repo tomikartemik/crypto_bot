@@ -48,9 +48,9 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	defer tickerTrailing.Stop()
 
 	// ждем смену тренда на всех монетах
-	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		t.waitingTrendChange[instId] = true
-	}
+	// for _, instId := range configs.BotCurrentConfig.TradingPairs {
+	// 	t.waitingTrendChange[instId] = true
+	// }
 
 	for {
 		select {
@@ -84,7 +84,7 @@ func (t *Trader) trade() {
 				trend = "Downtrend"
 			}
 			log.Printf("[Trader %s][%s] Первый запуск, текущий тренд: %s", t.cfg.APIKey, instId, trend)
-			continue
+			// continue
 		}
 
 		// Если нет позиции, ждем и тренд сменился - можно входить

@@ -182,12 +182,12 @@ func (c *MarketClient) Subscribe(ctx context.Context, instruments []string) erro
 	return nil
 }
 
-func (c *MarketClient) GetLotSize(instId string) (float64, error) {
+func (c *MarketClient) GetInstrumentInfo(instId string) (*models.InstrumentInfo, error) {
 	url := fmt.Sprintf("%s/api/v5/public/instruments?instType=SWAP&instId=%s", configs.BotCurrentConfig.BaseURL, instId)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if configs.BotCurrentConfig.IsSimulated {
@@ -196,7 +196,7 @@ func (c *MarketClient) GetLotSize(instId string) (float64, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -210,59 +210,25 @@ func (c *MarketClient) GetLotSize(instId string) (float64, error) {
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	if len(result.Data) == 0 || result.Data[0].MinSize == "" {
-		return 0, fmt.Errorf("lot size not found")
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("instrument info not found for %s", instId)
 	}
 
 	minSz, err := strconv.ParseFloat(result.Data[0].MinSize, 64)
 	if err != nil {
-		return 0, fmt.Errorf("parse minSz: %w", err)
+		return nil, fmt.Errorf("parse minSz: %w", err)
 	}
 
 	ctVal, err := strconv.ParseFloat(result.Data[0].CtVal, 64)
 	if err != nil {
-		return 0, fmt.Errorf("parse ctVal: %w", err)
+		return nil, fmt.Errorf("parse ctVal: %w", err)
 	}
 
-	return minSz * ctVal, nil
-}
-
-func (c *MarketClient) GetContractValue(instId string) (float64, error) {
-	url := fmt.Sprintf("%s/api/v5/public/instruments?instType=SWAP&instId=%s", configs.BotCurrentConfig.BaseURL, instId)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	if configs.BotCurrentConfig.IsSimulated {
-		req.Header.Set("x-simulated-trading", "1")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	var result struct {
-		Data []struct {
-			ContractVal string `json:"ctVal"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, err
-	}
-
-	if len(result.Data) == 0 || result.Data[0].ContractVal == "" {
-		return 0, fmt.Errorf("contract value not found")
-	}
-
-	return strconv.ParseFloat(result.Data[0].ContractVal, 64)
+	return &models.InstrumentInfo{
+		MinSize: minSz,
+		CtVal:   ctVal,
+	}, nil
 }

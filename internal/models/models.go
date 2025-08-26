@@ -33,3 +33,8 @@ func (p Position) String() string {
 		math.Abs((p.StopLossPrice/p.EntryPrice)-1)*100, // Процент от цены входа
 	)
 }
+
+type InstrumentInfo struct {
+	MinSize float64
+	CtVal   float64
+}

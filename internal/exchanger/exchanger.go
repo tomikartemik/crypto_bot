@@ -9,8 +9,7 @@ import (
 type MarketProvider interface {
 	GetCandlesticks(instId string, interval string, limit int) ([]models.Candlestick, error)
 	Subscribe(ctx context.Context, instruments []string) error
-	GetLotSize(instId string) (float64, error)
-	GetContractValue(instId string) (float64, error)
+	GetInstrumentInfo(instId string) (*models.InstrumentInfo, error)
 }
 
 type TradingAccount interface {

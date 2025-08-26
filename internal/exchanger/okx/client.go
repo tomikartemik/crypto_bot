@@ -7,7 +7,6 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
@@ -31,27 +30,19 @@ func NewClient(apiKey, apiSecret, passphrase string) *Client {
 	}
 }
 
-func (c *Client) PlaceOrder(instId, side, posSide string, size float64) error {
-	ctVal, ok := cache.Get().GetContractValue(instId)
-	if !ok || ctVal == 0 {
+func (c *Client) PlaceOrder(instId, side, posSide string, contracts float64) error {
+	lotSz, ok := cache.Get().GetLotSize(instId)
+	if !ok || lotSz == 0 {
 		return fmt.Errorf("не найден contract value для %s", instId)
 	}
 
-	// размер позиции в контрактах
-	contracts := size / ctVal
-	lotSz, ok := cache.Get().GetLotSize(instId)
-	if !ok || lotSz == 0 {
-		return fmt.Errorf("не найден lot size для %s", instId)
-	}
-
-	// округляем по шагу lotSz
 	precision := utils.CountDecimals(lotSz)
-	format := "%." + strconv.Itoa(precision) + "f"
-	sz := fmt.Sprintf(format, math.Floor(contracts/lotSz)*lotSz)
-
-	if sz == "0" || sz == "0.0" {
-		return fmt.Errorf("размер позиции меньше минимального lotSz")
+	contracts = math.Floor(contracts/lotSz) * lotSz * float64(configs.BotCurrentConfig.Leverage)
+	if contracts < lotSz {
+		return fmt.Errorf("размер в контрактах меньше минимального лота")
 	}
+
+	sz := fmt.Sprintf("%.*f", precision, contracts)
 
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	requestPath := "/api/v5/trade/order"
@@ -63,9 +54,8 @@ func (c *Client) PlaceOrder(instId, side, posSide string, size float64) error {
         "side":"%s",
         "ordType":"market",
         "posSide":"%s",
-        "sz":"%d",
-		"lever":"%d"
-    }`, instId, side, posSide, sz, configs.BotCurrentConfig.Leverage)
+        "sz":"%s",
+    }`, instId, side, posSide, sz)
 
 	req, _ := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(body)))
 	sign := signRequest("POST", requestPath, body, timestamp, c.apiSecret)
@@ -140,16 +130,22 @@ func (c *Client) GetTradeSize(instId, ccy string, riskPercent, price float64) (f
 		lotSize = 0.01
 	}
 
+	ctVal, ok := cache.Get().GetContractValue(instId)
+	if !ok {
+		log.Printf("ctVal для %s не найден", instId)
+		return 0, err
+	}
+
 	positionSizeUSDT := balance * riskPercent
-	tradeSize := positionSizeUSDT / price
+	contracts := positionSizeUSDT / (price * ctVal)
 
 	precision := utils.CountDecimals(lotSize)
 	scale := math.Pow(10, float64(precision))
-	size := math.Floor(tradeSize*scale) / scale
+	contracts = math.Floor(contracts*scale) / scale
 
-	if size < lotSize {
+	if contracts < lotSize {
 		return 0, fmt.Errorf("размер позиции меньше минимального лота")
 	}
 
-	return size, nil
+	return contracts, nil
 }
