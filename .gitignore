@@ -1,1 +1,6 @@
 trader_configs.json
+dist
+build.sh
+build_windows.bat
+go.sum
+go.mod

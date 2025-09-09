@@ -2,6 +2,7 @@ package configs
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 )
 
@@ -31,6 +32,8 @@ func LoadBotConfig(filename string) (BotConfig, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return BotConfig{}, err
 	}
+
+	fmt.Println(config)
 
 	return config, nil
 }

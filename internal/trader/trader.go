@@ -47,7 +47,6 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	tickerTrailing := time.NewTicker(10 * time.Second)
 	defer tickerTrailing.Stop()
 
-	// ждем смену тренда на всех монетах
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
 		t.waitingTrendChange[instId] = true
 	}
@@ -65,96 +64,84 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (t *Trader) trade() {
-	// пока достаем данные на нескольких монетах для 30м тф
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0]) // 15m
+		data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 		if !ok {
 			log.Printf("[Trader %s][%s] Нет данных в кэше по монете", t.cfg.APIKey, instId)
 			continue
 		}
 
 		tfIsUptrend := data.IsUptrend
-		price, _ := cache.Get().GetPrice(instId)
-
-		if t.lastIsUptrend[instId] == nil {
-			t.lastIsUptrend[instId] = new(bool)
-			*t.lastIsUptrend[instId] = tfIsUptrend
-			trend := "Uptrend"
-			if !*t.lastIsUptrend[instId] {
-				trend = "Downtrend"
-			}
-			log.Printf("[Trader %s][%s] Первый запуск, текущий тренд: %s", t.cfg.APIKey, instId, trend)
+		price, ok := cache.Get().GetPrice(instId)
+		if !ok {
+			log.Printf("[Trader %s][%s] Нет актуальной цены в кэше — пропуск шага", t.cfg.APIKey, instId)
 			continue
 		}
 
-		// Если нет позиции, ждем и тренд сменился - можно входить
-		if !t.isPositionOpen[instId] && t.waitingTrendChange[instId] && tfIsUptrend != *t.lastIsUptrend[instId] {
-			t.waitingTrendChange[instId] = false
+		// Инициализация при первом запуске
+		if t.lastIsUptrend[instId] == nil {
+			t.lastIsUptrend[instId] = new(bool)
+			*t.lastIsUptrend[instId] = tfIsUptrend
+			continue
 		}
 
-		switch {
-		case t.isPositionOpen[instId] && tfIsUptrend != *t.lastIsUptrend[instId]: // Была открытая позиция и тренд сменился
+		// Обнаружение смены тренда
+		trendChanged := tfIsUptrend != *t.lastIsUptrend[instId]
+
+		// Если тренд изменился и у нас есть открытая позиция - закрываем её
+		if trendChanged && t.isPositionOpen[instId] {
+			log.Printf("[Trader %s][%s] Обнаружена смена тренда, закрываем позицию", t.cfg.APIKey, instId)
+			t.closePosition(instId)
+		}
+
+		// Если тренд изменился (независимо от наличия позиции) - открываем новую позицию
+		if trendChanged {
+			log.Printf("[Trader %s][%s] Открываем позицию по новому тренду", t.cfg.APIKey, instId)
+
 			tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
 			if err != nil {
 				log.Printf("[Trader %s][%s] Не удалось получить tradeSize: %s", t.cfg.APIKey, instId, err)
 				continue
 			}
 
-			switch tfIsUptrend {
-			case true: // Аптренд - Закрываем SHORT, Открываем LONG
-				if err = t.Client.PlaceOrder(instId, "buy", "short", t.positions[instId].TradeSize); err != nil {
-					log.Printf("[Trader %s][%s] Ошибка при закрытии SHORT: %v", t.cfg.APIKey, instId, err)
-				} else {
-					log.Printf("[Trader %s][%s] Закрыт SHORT, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
-				}
-
-				if err = t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
+			if tfIsUptrend {
+				if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
 					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
 				} else {
-					t.positions[instId] = models.Position{InstId: instId, PosSide: "long", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 0.992}
-					log.Printf("[Trader %s][%s] Открыт LONG, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
+					t.trailingActivated[instId] = false
+					t.extremePrices[instId] = price
+					stopLossPrice := t.calculateStopLoss(instId, price, true)
+					t.positions[instId] = models.Position{
+						InstId:        instId,
+						PosSide:       "long",
+						TradeSize:     tradeSize,
+						EntryPrice:    price,
+						StopLossPrice: stopLossPrice,
+					}
+					t.isPositionOpen[instId] = true
+					log.Printf("[Trader %s][%s] Открыт LONG", t.cfg.APIKey, instId)
 				}
-			case false: // Даунтренд - Закрываем LONG, Открываем SHORT
-				if err = t.Client.PlaceOrder(instId, "sell", "long", t.positions[instId].TradeSize); err != nil {
-					log.Printf("[Trader %s][%s] Ошибка при закрытии LONG: %v", t.cfg.APIKey, instId, err)
-				} else {
-					log.Printf("[Trader %s][%s] Закрыт LONG, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
-				}
-
-				if err = t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
+			} else {
+				if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
 					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
 				} else {
-					t.positions[instId] = models.Position{InstId: instId, PosSide: "short", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 1.008}
-					log.Printf("[Trader %s][%s] Открыт SHORT, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
+					t.trailingActivated[instId] = false
+					t.extremePrices[instId] = price
+					stopLossPrice := t.calculateStopLoss(instId, price, false)
+					t.positions[instId] = models.Position{
+						InstId:        instId,
+						PosSide:       "short",
+						TradeSize:     tradeSize,
+						EntryPrice:    price,
+						StopLossPrice: stopLossPrice,
+					}
+					t.isPositionOpen[instId] = true
+					log.Printf("[Trader %s][%s] Открыт SHORT", t.cfg.APIKey, instId)
 				}
 			}
-		case !t.isPositionOpen[instId] && !t.waitingTrendChange[instId]: // Нет открытой позиции и не ждем смены тренда - входим в сделку
-			tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
-			if err != nil {
-				log.Printf("[Trader %s][%s] Не удалось получить tradeSize: %s", t.cfg.APIKey, instId, err)
-				continue
-			}
-
-			switch tfIsUptrend {
-			case true: // Аптренд - входим в лонг
-				if err = t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
-					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
-				} else {
-					t.positions[instId] = models.Position{InstId: instId, PosSide: "long", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 0.992}
-					log.Printf("[Trader %s][%s] Открыт LONG, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
-				}
-			case false: // Даунтренд - входим в шорт
-				if err = t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
-					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
-				} else {
-					t.positions[instId] = models.Position{InstId: instId, PosSide: "short", TradeSize: tradeSize, EntryPrice: price, StopLossPrice: price * 1.008}
-					log.Printf("[Trader %s][%s] Открыт SHORT, Позиция: %v", t.cfg.APIKey, instId, t.positions[instId].String())
-				}
-			}
-
-			t.isPositionOpen[instId] = true
 		}
 
+		// Обновляем последнее известное направление тренда
 		*t.lastIsUptrend[instId] = tfIsUptrend
 	}
 }
@@ -216,17 +203,40 @@ func (t *Trader) monitorTrailingStop() {
 	}
 }
 
+func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool) float64 {
+	data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
+	if !ok || data.ATR == 0 {
+		// Fallback к фиксированным процентам если ATR недоступен
+		if isUptrend {
+			return price * 0.992
+		}
+		return price * 1.008
+	}
+
+	stopLossDistance := data.ATR * configs.BotCurrentConfig.ATRMultiplierStopLoss
+	if isUptrend {
+		return price - stopLossDistance
+	}
+	return price + stopLossDistance
+}
+
 func (t *Trader) closePosition(instId string) {
+	if !t.isPositionOpen[instId] {
+		return
+	}
+
 	side := "sell"
 	if t.positions[instId].PosSide == "short" {
 		side = "buy"
 	}
 
 	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, t.positions[instId].TradeSize); err == nil {
+		log.Printf("[Trader %s][%s] Позиция закрыта", t.cfg.APIKey, instId)
 		t.isPositionOpen[instId] = false
 		t.trailingActivated[instId] = false
-		t.waitingTrendChange[instId] = true
 		delete(t.positions, instId)
+	} else {
+		log.Printf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err)
 	}
 }
 

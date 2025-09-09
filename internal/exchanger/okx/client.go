@@ -70,10 +70,18 @@ func (c *Client) PlaceOrder(instId, side, posSide string, contracts float64) err
 	}
 
 	resp, err := c.httpClient.Do(req)
+
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Response body:", string(bodyBytes))
 
 	return nil
 }
