@@ -44,20 +44,30 @@ func New() *Bot {
 }
 
 func (b *Bot) Run(ctx context.Context) {
-	// websocket
+	log.Println("=== Запуск бота ===")
+	log.Printf("Trading pairs: %v", configs.BotCurrentConfig.TradingPairs)
+
 	if err := b.client.Subscribe(ctx, configs.BotCurrentConfig.TradingPairs); err != nil {
 		log.Printf("Ошибка подписки на монеты: %v", err)
+	} else {
+		log.Println("Подписка на websocket успешно")
 	}
 
 	for _, inst := range configs.BotCurrentConfig.TradingPairs {
+		log.Printf("Запрос информации по инструменту %s", inst)
 		instInfo, err := b.client.GetInstrumentInfo(inst)
-		if err == nil {
+		if err != nil {
+			log.Printf("Не удалось получить info для %s: %v", inst, err)
+		} else {
 			cache.Get().SetLotSize(inst, instInfo.MinSize)
 			cache.Get().SetContractValue(inst, instInfo.CtVal)
+			log.Printf("Инструмент %s: MinSize=%f CtVal=%f", inst, instInfo.MinSize, instInfo.CtVal)
 		}
 
 		for _, trader := range b.traders {
-			trader.Client.SetLeverage(inst)
+			if err := trader.Client.SetLeverage(inst); err != nil {
+				log.Printf("SetLeverage error: %s", err)
+			}
 		}
 	}
 
@@ -66,16 +76,23 @@ func (b *Bot) Run(ctx context.Context) {
 		log.Fatalf("failed to parse timeframe %s: %v", configs.BotCurrentConfig.Timeframes[0], err)
 	}
 
-	now := time.Now()
-	nextInterval := now.Truncate(interval).Add(interval)
-	initialDelay := nextInterval.Sub(now)
-	time.Sleep(initialDelay)
+	log.Println("Запуск начального strategyUpdater (синхронно)")
+	b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	go b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	for _, t := range b.traders {
+		log.Printf("Запуск трейдера")
 		go t.Run(ctx, interval)
 	}
+
+	now := time.Now()
+	nextInterval := now.Truncate(interval).Add(interval)
+	initialDelay := nextInterval.Sub(now)
+	log.Printf("Ожидаем до следующей свечи: %v (now=%s next=%s)", initialDelay, now.Format(time.RFC3339), nextInterval.Format(time.RFC3339))
+	time.Sleep(initialDelay)
+
+	log.Println("Bot.Run: старт завершён")
 }
 
 func (b *Bot) Stop() {

@@ -50,7 +50,7 @@ func (c *Client) PlaceOrder(instId, side, posSide string, contracts float64) err
 
 	body := fmt.Sprintf(`{
         "instId":"%s",
-        "tdMode":"isolated",
+        "tdMode":"cross",
         "side":"%s",
         "ordType":"market",
         "posSide":"%s",
