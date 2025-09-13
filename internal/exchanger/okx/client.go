@@ -96,7 +96,7 @@ func (c *Client) SetLeverage(instId string) error {
 			"instId":"%s",
 			"lever":"%d",
 			"posSide":"%s",
-			"mgnMode":"isolated"
+			"mgnMode":"cross"
 		}`, instId, configs.BotCurrentConfig.Leverage, posSide)
 
 		req, _ := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(body)))
