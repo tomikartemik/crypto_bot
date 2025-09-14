@@ -77,8 +77,6 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 
 	log.Println("Запуск начального strategyUpdater (синхронно)")
-	b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
-
 	go b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	for _, t := range b.traders {
