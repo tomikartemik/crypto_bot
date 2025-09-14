@@ -76,7 +76,6 @@ func (b *Bot) Run(ctx context.Context) {
 		log.Fatalf("failed to parse timeframe %s: %v", configs.BotCurrentConfig.Timeframes[0], err)
 	}
 
-	log.Println("Запуск начального strategyUpdater (синхронно)")
 	go b.strategyUpdater(ctx, interval, configs.BotCurrentConfig.TradingPairs, configs.BotCurrentConfig.CandlesAmount)
 
 	for _, t := range b.traders {
