@@ -34,12 +34,16 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 		}
 	}
 
+	// Первичное обновление, чтобы были начальные данные
 	update()
 
 	// Выравниваемся к ближайшей границе интервала, чтобы последующие вызовы шли чётко по границам свечей
 	now := time.Now()
 	next := now.Truncate(interval).Add(interval)
 	time.Sleep(next.Sub(now))
+
+	// Обновляем прямо на границе
+	update()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

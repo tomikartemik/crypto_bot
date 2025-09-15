@@ -75,12 +75,16 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	}
 
 	log.Printf("[Trader %s] Выполнение initial trade() для всех пар", t.cfg.APIKey)
+	// Первичный проход (может не открыть сделок, если индикаторы ещё не посчитаны)
 	t.trade()
 
-	// Выровняем периодические тики по границам свечей
+	// Выравниваемся по границе, чтобы следующее действие было ровно в 15:00/15/30/45
 	now := time.Now()
 	next := now.Truncate(interval).Add(interval)
 	time.Sleep(next.Sub(now))
+
+	// Сразу обрабатываем сигнал на границе свечи
+	t.trade()
 
 	tickerTrade := time.NewTicker(interval)
 	defer tickerTrade.Stop()
