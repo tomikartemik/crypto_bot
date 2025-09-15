@@ -11,9 +11,6 @@ import (
 )
 
 func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instruments []string, candlesAmount int) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	update := func() {
 		for _, instId := range instruments {
 			for _, tf := range configs.BotCurrentConfig.Timeframes {
@@ -38,6 +35,14 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 	}
 
 	update()
+
+	// Выравниваемся к ближайшей границе интервала, чтобы последующие вызовы шли чётко по границам свечей
+	now := time.Now()
+	next := now.Truncate(interval).Add(interval)
+	time.Sleep(next.Sub(now))
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
 	for {
 		select {
