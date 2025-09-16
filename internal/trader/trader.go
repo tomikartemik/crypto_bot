@@ -26,6 +26,7 @@ type Trader struct {
 
 	updateCh        chan string
 	lastIndicatorAt map[string]time.Time
+	trendChangeCounter map[string]int
 }
 
 func NewTrader(cfg configs.TraderConfig) *Trader {
@@ -44,6 +45,7 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 		positions:          make(map[string]models.Position),
 		updateCh:           make(chan string, 128),
 		lastIndicatorAt:    make(map[string]time.Time),
+		trendChangeCounter: make(map[string]int),
 	}
 }
 
@@ -149,60 +151,52 @@ func (t *Trader) tradeFor(instId string) {
 	}
 
 	if trendChanged {
-		if t.actedOnTrend[instId] != nil && *t.actedOnTrend[instId] == tfIsUptrend {
-			log.Printf("[Trader %s][%s] Уже действовали по этому тренду (%v) — пропуск попытки открытия", t.cfg.APIKey, instId, tfIsUptrend)
+		// Входим сразу на первой свече нового тренда
+		tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
+		if err != nil {
+			log.Printf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err)
 		} else {
-			tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
-			if err != nil {
-				log.Printf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err)
-			} else {
-				if tfIsUptrend {
-					stopLossPrice := t.calculateStopLoss(instId, price, true)
-					log.Printf("[Trader %s][%s] Попытка открыть LONG: Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice)
-					if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
-						log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
-					} else {
-						t.trailingActivated[instId] = false
-						t.extremePrices[instId] = price
-						t.positions[instId] = models.Position{
-							InstId:        instId,
-							PosSide:       "long",
-							TradeSize:     tradeSize,
-							EntryPrice:    price,
-							StopLossPrice: stopLossPrice,
-						}
-						t.isPositionOpen[instId] = true
-
-						b := tfIsUptrend
-						t.actedOnTrend[instId] = new(bool)
-						*t.actedOnTrend[instId] = b
-
-						log.Printf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice)
-					}
+			if tfIsUptrend {
+				stopLossPrice := t.calculateStopLoss(instId, price, true)
+				log.Printf("[Trader %s][%s] Попытка открыть LONG (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice)
+				if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
 				} else {
-					stopLossPrice := t.calculateStopLoss(instId, price, false)
-					log.Printf("[Trader %s][%s] Попытка открыть SHORT: Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice)
-					if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
-						log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
-						// не устанавливаем actedOnTrend
-					} else {
-						t.trailingActivated[instId] = false
-						t.extremePrices[instId] = price
-						t.positions[instId] = models.Position{
-							InstId:        instId,
-							PosSide:       "short",
-							TradeSize:     tradeSize,
-							EntryPrice:    price,
-							StopLossPrice: stopLossPrice,
-						}
-						t.isPositionOpen[instId] = true
-
-						b := tfIsUptrend
-						t.actedOnTrend[instId] = new(bool)
-						*t.actedOnTrend[instId] = b
-
-						log.Printf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice)
+					t.trailingActivated[instId] = false
+					t.extremePrices[instId] = price
+					t.positions[instId] = models.Position{
+						InstId:        instId,
+						PosSide:       "long",
+						TradeSize:     tradeSize,
+						EntryPrice:    price,
+						StopLossPrice: stopLossPrice,
 					}
+					t.isPositionOpen[instId] = true
+					b := tfIsUptrend
+					t.actedOnTrend[instId] = new(bool)
+					*t.actedOnTrend[instId] = b
+					log.Printf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice)
+				}
+			} else {
+				stopLossPrice := t.calculateStopLoss(instId, price, false)
+				log.Printf("[Trader %s][%s] Попытка открыть SHORT (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice)
+				if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
+					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
+				} else {
+					t.trailingActivated[instId] = false
+					t.extremePrices[instId] = price
+					t.positions[instId] = models.Position{
+						InstId:        instId,
+						PosSide:       "short",
+						TradeSize:     tradeSize,
+						EntryPrice:    price,
+						StopLossPrice: stopLossPrice,
+					}
+					t.isPositionOpen[instId] = true
+					b := tfIsUptrend
+					t.actedOnTrend[instId] = new(bool)
+					*t.actedOnTrend[instId] = b
+					log.Printf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice)
 				}
 			}
 		}
