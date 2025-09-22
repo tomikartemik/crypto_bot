@@ -2,3 +2,4 @@ trader_configs.json
 dist
 build.sh
 build_windows.bat
+bot.log
