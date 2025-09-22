@@ -10,8 +10,7 @@ type BotConfig struct {
 	BaseURL               string   `json:"base_url"`
 	TradingPairs          []string `json:"trading_pairs"`
 	ATRPeriod             int      `json:"atr_period"`
-	ATRMultiplierTrailing float64  `json:"atr_multiplier_trailing"`
-	ATRMultiplierStopLoss float64  `json:"atr_multiplier_stop_loss"`
+	ATRMultiplierStop float64  `json:"atr_multiplier_stop"`
 	Multiplier            float64  `json:"multiplier"`
 	MinOrderSize          float64  `json:"min_order_size"`
 	Timeframes            []string `json:"timeframes"`

@@ -13,16 +13,12 @@ import (
 )
 
 type Trader struct {
-	cfg                configs.TraderConfig
-	Client             exchanger.TradingAccount
-	trailingActivated  map[string]bool
-	trailingStopPrices map[string]float64
-	extremePrices      map[string]float64
-	lastIsUptrend      map[string]*bool
-	actedOnTrend       map[string]*bool
-	isPositionOpen     map[string]bool
-	waitingTrendChange map[string]bool
-	positions          map[string]models.Position
+	cfg            configs.TraderConfig
+	Client         exchanger.TradingAccount
+	lastIsUptrend  map[string]*bool
+	actedOnTrend   map[string]*bool
+	isPositionOpen map[string]bool
+	positions      map[string]models.Position
 
 	updateCh           chan string
 	lastIndicatorAt    map[string]time.Time
@@ -33,18 +29,14 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 	client := okx.NewClient(cfg.APIKey, cfg.APISecret, cfg.Passphrase)
 
 	return &Trader{
-		cfg:                cfg,
-		Client:             client,
-		trailingActivated:  make(map[string]bool),
-		trailingStopPrices: make(map[string]float64),
-		extremePrices:      make(map[string]float64),
-		lastIsUptrend:      make(map[string]*bool),
-		actedOnTrend:       make(map[string]*bool),
-		isPositionOpen:     make(map[string]bool),
-		waitingTrendChange: make(map[string]bool),
-		positions:          make(map[string]models.Position),
-		updateCh:           make(chan string, 128),
-		lastIndicatorAt:    make(map[string]time.Time),
+		cfg:            cfg,
+		Client:         client,
+		lastIsUptrend:  make(map[string]*bool),
+		actedOnTrend:   make(map[string]*bool),
+		isPositionOpen: make(map[string]bool),
+		positions:      make(map[string]models.Position),
+		updateCh:       make(chan string, 128),
+		lastIndicatorAt: make(map[string]time.Time),
 		trendChangeCounter: make(map[string]int),
 	}
 }
@@ -60,8 +52,6 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	log.Printf("[Trader %s] Run started (interval=%s)", t.cfg.APIKey, interval)
 
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		t.waitingTrendChange[instId] = true
-
 		if data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0]); ok {
 			b := data.IsUptrend
 			t.lastIsUptrend[instId] = new(bool)
@@ -103,7 +93,7 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 		case <-tickerTrade.C:
 			t.trade()
 		case <-tickerTrailing.C:
-			t.monitorTrailingStop()
+			t.monitorStop()
 		}
 	}
 }
@@ -161,8 +151,6 @@ func (t *Trader) tradeFor(instId string) {
 				if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
 					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
 				} else {
-					t.trailingActivated[instId] = false
-					t.extremePrices[instId] = price
 					t.positions[instId] = models.Position{
 						InstId:        instId,
 						PosSide:       "long",
@@ -182,8 +170,6 @@ func (t *Trader) tradeFor(instId string) {
 				if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
 					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
 				} else {
-					t.trailingActivated[instId] = false
-					t.extremePrices[instId] = price
 					t.positions[instId] = models.Position{
 						InstId:        instId,
 						PosSide:       "short",
@@ -205,7 +191,7 @@ func (t *Trader) tradeFor(instId string) {
 	t.lastIndicatorAt[instId] = time.Now()
 }
 
-func (t *Trader) monitorTrailingStop() {
+func (t *Trader) monitorStop() {
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
 		if !t.isPositionOpen[instId] {
 			continue
@@ -229,34 +215,16 @@ func (t *Trader) monitorTrailingStop() {
 			dir = -1
 		}
 
-		log.Printf("[Trader %s][%s] monitorTrailingStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s trailingActive=%v", t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.trailingActivated[instId])
+		// Простой стоп-лосс: всегда на фиксированном расстоянии от текущей цены
+		stopDistance := atr * configs.BotCurrentConfig.ATRMultiplierStop
+		stopPrice := price - dir*stopDistance
 
-		if !t.trailingActivated[instId] && dir*(price-t.positions[instId].EntryPrice) > atr*configs.BotCurrentConfig.ATRMultiplierTrailing*0.5 {
-			t.trailingActivated[instId] = true
-			t.extremePrices[instId] = price
-			t.trailingStopPrices[instId] = price - dir*atr*configs.BotCurrentConfig.ATRMultiplierTrailing
-			log.Printf("[Trader %s][%s] Активация трейлинга: Extreme=%.6f TrailingStop=%.6f", t.cfg.APIKey, instId, price, t.trailingStopPrices[instId])
-		}
+		log.Printf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s Stop=%.6f", 
+			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, stopPrice)
 
-		if t.trailingActivated[instId] {
-			oldExtreme := t.extremePrices[instId]
-			oldTrailing := t.trailingStopPrices[instId]
-
-			if dir*(price-t.extremePrices[instId]) > 0 {
-				t.extremePrices[instId] = price
-				t.trailingStopPrices[instId] = t.extremePrices[instId] - dir*atr*configs.BotCurrentConfig.ATRMultiplierTrailing
-				log.Printf("[Trader %s][%s] Обновлён трейлинг: Extreme %.6f→%.6f Stop %.6f→%.6f (ΔStop=%.6f)", t.cfg.APIKey, instId, oldExtreme, t.extremePrices[instId], oldTrailing, t.trailingStopPrices[instId], t.trailingStopPrices[instId]-oldTrailing)
-			}
-
-			if dir*(price-t.trailingStopPrices[instId]) <= 0 {
-				log.Printf("[Trader %s][%s] Закрыт %s по трейлинг-стопу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.trailingStopPrices[instId], price)
-				t.closePosition(instId)
-				continue
-			}
-		}
-
-		if dir*(price-t.positions[instId].EntryPrice) <= -atr*configs.BotCurrentConfig.ATRMultiplierStopLoss {
-			log.Printf("[Trader %s][%s] Сработал стоп-лосс %s: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.positions[instId].StopLossPrice, price)
+		// Проверяем стоп-лосс
+		if dir*(price-stopPrice) <= 0 {
+			log.Printf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, stopPrice, price)
 			t.closePosition(instId)
 		}
 	}
@@ -271,7 +239,7 @@ func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool)
 		}
 		return price * 1.008
 	}
-	stopLossDistance := data.ATR * configs.BotCurrentConfig.ATRMultiplierStopLoss
+	stopLossDistance := data.ATR * configs.BotCurrentConfig.ATRMultiplierStop
 	if isUptrend {
 		return price - stopLossDistance
 	}
@@ -306,7 +274,6 @@ func (t *Trader) closePosition(instId string) {
 	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, size); err == nil {
 		log.Printf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId)
 		t.isPositionOpen[instId] = false
-		t.trailingActivated[instId] = false
 		delete(t.positions, instId)
 		t.actedOnTrend[instId] = nil
 	} else {

@@ -7,8 +7,7 @@
     "ccy": "USDT",
     "is_simulated": false,
     "trading_pairs": ["ADA-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
-    "atr_multiplier_trailing": 2.5,
-    "atr_multiplier_stop_loss": 1.8,
+    "atr_multiplier_stop": 2.0,
     "timeframes": ["30m"],
     "risk_percent": 0.1,
     "leverage": 10
