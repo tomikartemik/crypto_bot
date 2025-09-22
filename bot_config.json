@@ -5,10 +5,11 @@
     "multiplier": 3.0,
     "min_order_size": 0.0,
     "ccy": "USDT",
-    "is_simulated": false,
+    "is_simulated": true,
     "trading_pairs": ["ADA-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
-    "atr_multiplier_stop": 2.0,
-    "timeframes": ["30m"],
+    "atr_multiplier_stop": 3.0,
+    "timeframes": ["5m"],
     "risk_percent": 0.1,
-    "leverage": 10
+    "leverage": 10,
+    "debug_mode": true
 }

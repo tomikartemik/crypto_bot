@@ -2,12 +2,12 @@ package bot
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
 	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
 	"github.com/kuromii5/supertrend_trade_bot/internal/indicators"
+	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 )
 
 func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instruments []string, candlesAmount int) {
@@ -16,7 +16,7 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 			for _, tf := range configs.BotCurrentConfig.Timeframes {
 				candles, err := b.client.GetCandlesticks(instId, tf, candlesAmount)
 				if err != nil {
-					log.Printf("[strategyUpdater] Ошибка получения свечей %s %s: %v", instId, tf, err)
+					log.Log.Error("[strategyUpdater] Ошибка получения свечей", "inst", instId, "tf", tf, "error", err)
 					continue
 				}
 
@@ -42,11 +42,11 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 	next := now.Truncate(interval).Add(interval)
 	time.Sleep(next.Sub(now))
 
-	// Обновляем прямо на границе
-	update()
-
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	// Обновляем прямо на границе
+	update()
 
 	for {
 		select {

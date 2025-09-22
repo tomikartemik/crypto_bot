@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/kuromii5/supertrend_trade_bot/internal/bot"
+	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 )
 
 func main() {
@@ -19,6 +19,6 @@ func main() {
 	go bot.Run(ctx)
 
 	<-ctx.Done()
-	log.Println("Получен сигнал завершения, остановка бота...")
+	log.Log.Info("Получен сигнал, остановка бота...")
 	bot.Stop()
 }

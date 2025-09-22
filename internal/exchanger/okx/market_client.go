@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kuromii5/supertrend_trade_bot/configs"
 	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
+	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 	"github.com/kuromii5/supertrend_trade_bot/internal/models"
 )
 
@@ -104,7 +104,6 @@ func (c *MarketClient) Subscribe(ctx context.Context, instruments []string) erro
 		for {
 			conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 			if err != nil {
-				log.Printf("Ошибка подключения к OKX WebSocket: %v", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
@@ -120,14 +119,14 @@ func (c *MarketClient) Subscribe(ctx context.Context, instruments []string) erro
 					},
 				}
 				if err := conn.WriteJSON(sub); err != nil {
-					log.Printf("Ошибка подписки %s: %v", instId, err)
+					log.Log.Error("Ошибка подписки", "inst", instId, "error", err)
 				}
 			}
 
-			conn.SetReadLimit(512)
-			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+			conn.SetReadLimit(1024)
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			conn.SetPongHandler(func(appData string) error {
-				conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+				conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 				return nil
 			})
 
@@ -140,7 +139,7 @@ func (c *MarketClient) Subscribe(ctx context.Context, instruments []string) erro
 						return
 					case <-ticker.C:
 						if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-							log.Printf("Ошибка отправки ping: %v", err)
+							log.Log.Error("Ошибка отправки ping", "error", err)
 							return
 						}
 					}
@@ -150,13 +149,13 @@ func (c *MarketClient) Subscribe(ctx context.Context, instruments []string) erro
 			for {
 				select {
 				case <-ctx.Done():
-					log.Println("Закрываем WS соединение")
+					log.Log.Error("Закрываем WS соединение")
 					conn.Close()
 					return
 				default:
 					_, message, err := conn.ReadMessage()
 					if err != nil {
-						log.Printf("Ошибка чтения из WebSocket: %v", err)
+						log.Log.Error("Ошибка чтения из WebSocket", "error", err)
 						conn.Close()
 						time.Sleep(2 * time.Second)
 						continue reconnect

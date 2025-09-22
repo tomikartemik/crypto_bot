@@ -2,13 +2,14 @@ package trader
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
 	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger"
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger/okx"
+	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 	"github.com/kuromii5/supertrend_trade_bot/internal/models"
 )
 
@@ -20,7 +21,7 @@ type Trader struct {
 	isPositionOpen map[string]bool
 	positions      map[string]models.Position
 
-	updateCh           chan string
+	updateCh           chan string //! удали его если мы все равно им не пользуемся
 	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
 }
@@ -29,14 +30,14 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 	client := okx.NewClient(cfg.APIKey, cfg.APISecret, cfg.Passphrase)
 
 	return &Trader{
-		cfg:            cfg,
-		Client:         client,
-		lastIsUptrend:  make(map[string]*bool),
-		actedOnTrend:   make(map[string]*bool),
-		isPositionOpen: make(map[string]bool),
-		positions:      make(map[string]models.Position),
-		updateCh:       make(chan string, 128),
-		lastIndicatorAt: make(map[string]time.Time),
+		cfg:                cfg,
+		Client:             client,
+		lastIsUptrend:      make(map[string]*bool),
+		actedOnTrend:       make(map[string]*bool),
+		isPositionOpen:     make(map[string]bool),
+		positions:          make(map[string]models.Position),
+		updateCh:           make(chan string, 128),
+		lastIndicatorAt:    make(map[string]time.Time),
 		trendChangeCounter: make(map[string]int),
 	}
 }
@@ -49,35 +50,38 @@ func (t *Trader) NotifyUpdate(instId string) {
 }
 
 func (t *Trader) Run(ctx context.Context, interval time.Duration) {
-	log.Printf("[Trader %s] Run started (interval=%s)", t.cfg.APIKey, interval)
+	log.Log.Debug(fmt.Sprintf("[Trader %s] Начало торговли (tf=%s)", t.cfg.APIKey, interval))
 
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
 		if data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0]); ok {
 			b := data.IsUptrend
 			t.lastIsUptrend[instId] = new(bool)
 			*t.lastIsUptrend[instId] = b
-			log.Printf("[Trader %s][%s] Инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, b)
+			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, b))
 		} else {
 			t.lastIsUptrend[instId] = nil
-			log.Printf("[Trader %s][%s] lastIsUptrend оставляем nil (нет данных в кэше)", t.cfg.APIKey, instId)
+			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] lastIsUptrend оставляем nil (нет данных в кэше)", t.cfg.APIKey, instId))
 		}
 		t.actedOnTrend[instId] = nil
 	}
 
-	log.Printf("[Trader %s] Выполнение initial trade() для всех пар", t.cfg.APIKey)
+	log.Log.Info(fmt.Sprintf("[Trader %s] Выполнение initial trade() для всех пар", t.cfg.APIKey))
 	// Первичный проход (может не открыть сделок, если индикаторы ещё не посчитаны)
+	//! он никогда не откроет, т.к. strategyUpdater апдейтится всегда позже чем вызов этого метода.
+	//! Можно поставить мьютекс и локаться, пока первый update не отработает
 	t.trade()
 
-	// Выравниваемся по границе, чтобы следующее действие было ровно в 15:00/15/30/45
+	// Выравниваемся по границе, чтобы следующее действие было ровно по интервалу
 	now := time.Now()
 	next := now.Truncate(interval).Add(interval)
 	time.Sleep(next.Sub(now))
 
-	// Сразу обрабатываем сигнал на границе свечи
-	t.trade()
-
+	//! Тикер надо запускать перед трейдом, чтобы не ждать пока t.trade() закончит выполняться
 	tickerTrade := time.NewTicker(interval)
 	defer tickerTrade.Stop()
+
+	// Сразу обрабатываем сигнал на границе свечи
+	t.trade()
 
 	tickerTrailing := time.NewTicker(10 * time.Second)
 	defer tickerTrailing.Stop()
@@ -85,10 +89,10 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[Trader %s] context done, exiting Run", t.cfg.APIKey)
+			log.Log.Info(fmt.Sprintf("[Trader %s] Получен сигнал, выключение трейдера", t.cfg.APIKey))
 			return
 		case inst := <-t.updateCh:
-			log.Printf("[Trader %s][%s] NotifyUpdate received — немедленная обработка", t.cfg.APIKey, inst)
+			log.Log.Info(fmt.Sprintf("[Trader %s][%s] NotifyUpdate received — немедленная обработка", t.cfg.APIKey, inst))
 			t.tradeFor(inst)
 		case <-tickerTrade.C:
 			t.trade()
@@ -100,24 +104,24 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 
 func (t *Trader) trade() {
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		t.tradeFor(instId)
+		if err := t.tradeFor(instId); err != nil {
+			log.Log.Error("[tradeFor] Ошибка в трейде", "error", err)
+		}
 	}
 }
 
-func (t *Trader) tradeFor(instId string) {
+func (t *Trader) tradeFor(instId string) error {
 	data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 	if !ok {
-		log.Printf("[Trader %s][%s] Нет данных индикаторов в кэше", t.cfg.APIKey, instId)
-		return
+		return fmt.Errorf("[Trader %s][%s] Нет данных индикаторов в кэше", t.cfg.APIKey, instId)
 	}
 
 	price, ok := cache.Get().GetPrice(instId)
 	if !ok {
-		log.Printf("[Trader %s][%s] Нет актуальной цены в кэше — пропуск шага", t.cfg.APIKey, instId)
-		return
+		return fmt.Errorf("[Trader %s][%s] Нет актуальной цены в кэше — пропуск шага", t.cfg.APIKey, instId)
 	}
 
-	log.Printf("[Trader %s][%s] tradeFor(): time=%s Price=%.6f Supertrend=%.6f ATR=%.6f IsUptrend=%v", t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, data.Supertrend, data.ATR, data.IsUptrend)
+	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] tradeFor(): time=%s Price=%.6f Supertrend=%.6f ATR=%.6f IsUptrend=%v", t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, data.Supertrend, data.ATR, data.IsUptrend))
 	t.lastIndicatorAt[instId] = time.Now()
 
 	tfIsUptrend := data.IsUptrend
@@ -125,31 +129,31 @@ func (t *Trader) tradeFor(instId string) {
 	if t.lastIsUptrend[instId] == nil {
 		t.lastIsUptrend[instId] = new(bool)
 		*t.lastIsUptrend[instId] = tfIsUptrend
-		log.Printf("[Trader %s][%s] Первая инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, tfIsUptrend)
-		return
+		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Первая инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, tfIsUptrend))
+		return nil
 	}
 
 	prevTrend := *t.lastIsUptrend[instId]
 	trendChanged := tfIsUptrend != prevTrend
 	if trendChanged {
-		log.Printf("[Trader %s][%s] Обнаружена смена тренда: было %v → стало %v", t.cfg.APIKey, instId, prevTrend, tfIsUptrend)
+		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Обнаружена смена тренда: было %v → стало %v", t.cfg.APIKey, instId, prevTrend, tfIsUptrend))
 	}
 
 	if trendChanged && t.isPositionOpen[instId] {
-		log.Printf("[Trader %s][%s] Закрываем позицию перед сменой тренда", t.cfg.APIKey, instId)
+		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрываем позицию перед сменой тренда", t.cfg.APIKey, instId))
 		t.closePosition(instId)
 	}
 
 	if trendChanged {
 		tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
 		if err != nil {
-			log.Printf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err)
+			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err))
 		} else {
 			if tfIsUptrend {
 				stopLossPrice := t.calculateStopLoss(instId, price, true)
-				log.Printf("[Trader %s][%s] Попытка открыть LONG (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice)
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Попытка открыть LONG (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice))
 				if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
-					log.Printf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err)
+					log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err))
 				} else {
 					t.positions[instId] = models.Position{
 						InstId:        instId,
@@ -162,13 +166,13 @@ func (t *Trader) tradeFor(instId string) {
 					b := tfIsUptrend
 					t.actedOnTrend[instId] = new(bool)
 					*t.actedOnTrend[instId] = b
-					log.Printf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice)
+					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
 				}
 			} else {
 				stopLossPrice := t.calculateStopLoss(instId, price, false)
-				log.Printf("[Trader %s][%s] Попытка открыть SHORT (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice)
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Попытка открыть SHORT (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice))
 				if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
-					log.Printf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err)
+					log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err))
 				} else {
 					t.positions[instId] = models.Position{
 						InstId:        instId,
@@ -181,7 +185,7 @@ func (t *Trader) tradeFor(instId string) {
 					b := tfIsUptrend
 					t.actedOnTrend[instId] = new(bool)
 					*t.actedOnTrend[instId] = b
-					log.Printf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice)
+					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
 				}
 			}
 		}
@@ -189,6 +193,7 @@ func (t *Trader) tradeFor(instId string) {
 
 	*t.lastIsUptrend[instId] = tfIsUptrend
 	t.lastIndicatorAt[instId] = time.Now()
+	return nil
 }
 
 func (t *Trader) monitorStop() {
@@ -199,13 +204,13 @@ func (t *Trader) monitorStop() {
 
 		price, ok := cache.Get().GetPrice(instId)
 		if !ok {
-			log.Printf("[Trader %s][%s] Нет цены для monitorTrailingStop", t.cfg.APIKey, instId)
+			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет цены для monitorTrailingStop", t.cfg.APIKey, instId))
 			continue
 		}
 
 		data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 		if !ok {
-			log.Printf("[Trader %s][%s] Нет данных индикаторов в monitorTrailingStop", t.cfg.APIKey, instId)
+			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет данных индикаторов в monitorTrailingStop", t.cfg.APIKey, instId))
 			continue
 		}
 
@@ -219,19 +224,19 @@ func (t *Trader) monitorStop() {
 		stopDistance := atr * configs.BotCurrentConfig.ATRMultiplierStop
 		stopPrice := price - dir*stopDistance
 
-		log.Printf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s Stop=%.6f", 
-			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, stopPrice)
+		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s Stop=%.6f",
+			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, stopPrice))
 
 		// Проверяем стоп-лосс
 		if dir*(price-stopPrice) <= 0 {
-			log.Printf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, stopPrice, price)
+			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, stopPrice, price))
 			t.closePosition(instId)
 		}
 	}
 }
 
 func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool) float64 {
-	log.Printf("[Trader %s][%s] Расчёт стоп-лосса: Price=%.6f IsUptrend=%v", t.cfg.APIKey, instId, price, isUptrend)
+	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Расчёт стоп-лосса: Price=%.6f IsUptrend=%v", t.cfg.APIKey, instId, price, isUptrend))
 	data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 	if !ok || data.ATR == 0 {
 		if isUptrend {
@@ -248,7 +253,7 @@ func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool)
 
 func (t *Trader) closePosition(instId string) {
 	if !t.isPositionOpen[instId] {
-		log.Printf("[Trader %s][%s] closePosition вызван, но позиции нет", t.cfg.APIKey, instId)
+		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] closePosition вызван, но позиции нет", t.cfg.APIKey, instId))
 		return
 	}
 
@@ -264,26 +269,25 @@ func (t *Trader) closePosition(instId string) {
 
 	price, ok := cache.Get().GetPrice(instId)
 	if !ok {
-		log.Printf("[Trader %s][%s] Не удалось получить цену для расчёта PnL при закрытии, используем entry", t.cfg.APIKey, instId)
+		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Не удалось получить цену для расчёта PnL при закрытии, используем entry", t.cfg.APIKey, instId))
 		price = entry
 	}
 
 	pnl := 100.0 * (price - entry) / entry * dir
-	log.Printf("[Trader %s][%s] Закрытие позиции: PosSide=%s Entry=%.6f Current=%.6f Size=%.6f PnL=%.3f%%", t.cfg.APIKey, instId, t.positions[instId].PosSide, entry, price, size, pnl)
+	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрытие позиции: PosSide=%s Entry=%.6f Current=%.6f Size=%.6f PnL=%.3f%%", t.cfg.APIKey, instId, t.positions[instId].PosSide, entry, price, size, pnl))
 
 	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, size); err == nil {
-		log.Printf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId)
+		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId))
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
 		t.actedOnTrend[instId] = nil
 	} else {
-		log.Printf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err)
+		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))
 	}
 }
 
 func (t *Trader) Stop() {
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		log.Printf("[Trader %s][%s] Закрытие позиции", t.cfg.APIKey, instId)
 		t.closePosition(instId)
 	}
 }

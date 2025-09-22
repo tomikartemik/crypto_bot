@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"time"
@@ -134,14 +133,12 @@ func (c *Client) GetTradeSize(instId, ccy string, riskPercent, price float64) (f
 
 	lotSize, ok := cache.Get().GetLotSize(instId)
 	if !ok {
-		log.Printf("lotSize для %s не найден, fallback на 0.01", instId)
-		lotSize = 0.01
+		return 0, fmt.Errorf("lotSize для %s не найден", instId)
 	}
 
 	ctVal, ok := cache.Get().GetContractValue(instId)
 	if !ok {
-		log.Printf("ctVal для %s не найден", instId)
-		return 0, err
+		return 0, fmt.Errorf("ctVal для %s не найден", instId)
 	}
 
 	positionSizeUSDT := balance * riskPercent

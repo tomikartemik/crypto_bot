@@ -2,7 +2,6 @@ package configs
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 )
 
@@ -22,8 +21,6 @@ func LoadConfigs(filename string) ([]TraderConfig, error) {
 	if err := json.Unmarshal(data, &configs); err != nil {
 		return nil, err
 	}
-
-	fmt.Println(configs)
 
 	return configs, nil
 }

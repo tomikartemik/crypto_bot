@@ -1,0 +1,12 @@
+time=2025-09-22T21:05:20.191Z level=INFO msg="=== Запуск бота ==="
+time=2025-09-22T21:05:20.191Z level=DEBUG msg="Trading pairs" pairs="[ADA-USDT-SWAP ETH-USDT-SWAP SOL-USDT-SWAP]"
+time=2025-09-22T21:05:20.191Z level=DEBUG msg="Подписка на websocket успешна"
+time=2025-09-22T21:05:20.192Z level=DEBUG msg="Запрос информации по инструменту" instId=ADA-USDT-SWAP
+time=2025-09-22T21:05:20.547Z level=DEBUG msg="Данные по инструменту" instId=ADA-USDT-SWAP MinSize=0.1 CtVal=100
+time=2025-09-22T21:05:21.556Z level=DEBUG msg="Запрос информации по инструменту" instId=ETH-USDT-SWAP
+time=2025-09-22T21:05:21.795Z level=DEBUG msg="Данные по инструменту" instId=ETH-USDT-SWAP MinSize=0.01 CtVal=0.1
+time=2025-09-22T21:05:22.811Z level=DEBUG msg="Запрос информации по инструменту" instId=SOL-USDT-SWAP
+time=2025-09-22T21:05:23.057Z level=DEBUG msg="Данные по инструменту" instId=SOL-USDT-SWAP MinSize=0.01 CtVal=1
+time=2025-09-22T21:05:24.061Z level=INFO msg="Запуск трейдера" trader=*trader.Trader
+time=2025-09-22T21:05:24.062Z level=DEBUG msg="Ожидаем до следующей свечи" delay=24m35.937745832s now=2025-09-22T21:05:24Z next=2025-09-22T21:30:00Z
+time=2025-09-22T21:05:25.898Z level=INFO msg="Получен сигнал, остановка бота..."
