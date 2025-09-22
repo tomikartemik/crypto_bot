@@ -24,8 +24,8 @@ type Trader struct {
 	waitingTrendChange map[string]bool
 	positions          map[string]models.Position
 
-	updateCh        chan string
-	lastIndicatorAt map[string]time.Time
+	updateCh           chan string
+	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
 }
 
@@ -151,7 +151,6 @@ func (t *Trader) tradeFor(instId string) {
 	}
 
 	if trendChanged {
-		// Входим сразу на первой свече нового тренда
 		tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
 		if err != nil {
 			log.Printf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err)
@@ -232,7 +231,7 @@ func (t *Trader) monitorTrailingStop() {
 
 		log.Printf("[Trader %s][%s] monitorTrailingStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s trailingActive=%v", t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.trailingActivated[instId])
 
-		if !t.trailingActivated[instId] && dir*(price-t.positions[instId].EntryPrice) > atr*1.2 {
+		if !t.trailingActivated[instId] && dir*(price-t.positions[instId].EntryPrice) > atr*configs.BotCurrentConfig.ATRMultiplierTrailing*0.5 {
 			t.trailingActivated[instId] = true
 			t.extremePrices[instId] = price
 			t.trailingStopPrices[instId] = price - dir*atr*configs.BotCurrentConfig.ATRMultiplierTrailing
