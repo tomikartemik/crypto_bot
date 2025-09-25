@@ -14,14 +14,14 @@ import (
 )
 
 type Trader struct {
-	cfg            configs.TraderConfig
-	Client         exchanger.TradingAccount
-	lastIsUptrend  map[string]*bool
-	actedOnTrend   map[string]*bool
-	isPositionOpen map[string]bool
-	positions      map[string]models.Position
-
-	updateCh           chan string //! удали его если мы все равно им не пользуемся
+	cfg                configs.TraderConfig
+	Client             exchanger.TradingAccount
+	lastIsUptrend      map[string]*bool
+	actedOnTrend       map[string]*bool
+	isPositionOpen     map[string]bool
+	positions          map[string]models.Position
+	bestStopPrice      map[string]float64
+	updateCh           chan string
 	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
 }
@@ -36,16 +36,10 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 		actedOnTrend:       make(map[string]*bool),
 		isPositionOpen:     make(map[string]bool),
 		positions:          make(map[string]models.Position),
+		bestStopPrice:      make(map[string]float64),
 		updateCh:           make(chan string, 128),
 		lastIndicatorAt:    make(map[string]time.Time),
 		trendChangeCounter: make(map[string]int),
-	}
-}
-
-func (t *Trader) NotifyUpdate(instId string) {
-	select {
-	case t.updateCh <- instId:
-	default:
 	}
 }
 
@@ -204,13 +198,13 @@ func (t *Trader) monitorStop() {
 
 		price, ok := cache.Get().GetPrice(instId)
 		if !ok {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет цены для monitorTrailingStop", t.cfg.APIKey, instId))
+			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет цены для monitorStop", t.cfg.APIKey, instId))
 			continue
 		}
 
 		data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 		if !ok {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет данных индикаторов в monitorTrailingStop", t.cfg.APIKey, instId))
+			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет данных индикаторов в monitorStop", t.cfg.APIKey, instId))
 			continue
 		}
 
@@ -220,16 +214,32 @@ func (t *Trader) monitorStop() {
 			dir = -1
 		}
 
-		// Простой стоп-лосс: всегда на фиксированном расстоянии от текущей цены
 		stopDistance := atr * configs.BotCurrentConfig.ATRMultiplierStop
-		stopPrice := price - dir*stopDistance
+		newStopPrice := price - dir*stopDistance
 
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s Stop=%.6f",
-			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, stopPrice))
+		if t.bestStopPrice[instId] == 0 {
+			t.bestStopPrice[instId] = newStopPrice
+			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Инициализация стоп-лосса: %.6f", t.cfg.APIKey, instId, newStopPrice))
+		} else {
+			shouldUpdate := false
+			if t.positions[instId].PosSide == "long" {
+				shouldUpdate = newStopPrice > t.bestStopPrice[instId]
+			} else {
+				shouldUpdate = newStopPrice < t.bestStopPrice[instId]
+			}
 
-		// Проверяем стоп-лосс
-		if dir*(price-stopPrice) <= 0 {
-			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, stopPrice, price))
+			if shouldUpdate {
+				oldStop := t.bestStopPrice[instId]
+				t.bestStopPrice[instId] = newStopPrice
+				log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Улучшен стоп-лосс: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
+			}
+		}
+
+		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s BestStop=%.6f NewStop=%.6f",
+			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.bestStopPrice[instId], newStopPrice))
+
+		if dir*(price-t.bestStopPrice[instId]) <= 0 {
+			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.bestStopPrice[instId], price))
 			t.closePosition(instId)
 		}
 	}
@@ -280,6 +290,7 @@ func (t *Trader) closePosition(instId string) {
 		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId))
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
+		delete(t.bestStopPrice, instId)
 		t.actedOnTrend[instId] = nil
 	} else {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))
