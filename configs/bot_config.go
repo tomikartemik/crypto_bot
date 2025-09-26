@@ -22,6 +22,7 @@ type BotConfig struct {
 	IsSimulated       bool     `json:"is_simulated"`
 	Leverage          int      `json:"leverage"`
 	DebugMode         bool     `json:"debug_mode"`
+	Margin            string   `json:"margin"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {

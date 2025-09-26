@@ -11,5 +11,6 @@
     "timeframes": ["5m"],
     "risk_percent": 0.1,
     "leverage": 10,
-    "debug_mode": true
+    "debug_mode": true,
+    "margin": "cross"
 }

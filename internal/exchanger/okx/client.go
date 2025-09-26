@@ -10,6 +10,7 @@ import (
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
 	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
+	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 	"github.com/kuromii5/supertrend_trade_bot/internal/utils"
 )
 
@@ -49,12 +50,12 @@ func (c *Client) PlaceOrder(instId, side, posSide string, contracts float64) err
 
 	body := fmt.Sprintf(`{
         "instId":"%s",
-        "tdMode":"cross",
+        "tdMode":"%s",
         "side":"%s",
         "ordType":"market",
         "posSide":"%s",
         "sz":"%s",
-    }`, instId, side, posSide, sz)
+    }`, instId, configs.BotCurrentConfig.Margin, side, posSide, sz)
 
 	req, _ := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(body)))
 	sign := signRequest("POST", requestPath, body, timestamp, c.apiSecret)
@@ -80,7 +81,7 @@ func (c *Client) PlaceOrder(instId, side, posSide string, contracts float64) err
 		return err
 	}
 
-	fmt.Println("Response body:", string(bodyBytes))
+	log.Log.Debug("Response body", "body", string(bodyBytes))
 
 	return nil
 }
@@ -95,8 +96,8 @@ func (c *Client) SetLeverage(instId string) error {
 			"instId":"%s",
 			"lever":"%d",
 			"posSide":"%s",
-			"mgnMode":"cross"
-		}`, instId, configs.BotCurrentConfig.Leverage, posSide)
+			"mgnMode":"%s"
+		}`, instId, configs.BotCurrentConfig.Leverage, posSide, configs.BotCurrentConfig.Margin)
 
 		req, _ := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(body)))
 		sign := signRequest("POST", requestPath, body, timestamp, c.apiSecret)

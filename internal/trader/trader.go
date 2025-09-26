@@ -231,7 +231,7 @@ func (t *Trader) monitorStop() {
 			if shouldUpdate {
 				oldStop := t.bestStopPrice[instId]
 				t.bestStopPrice[instId] = newStopPrice
-				log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Улучшен стоп-лосс: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Улучшен стоп-лосс: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
 			}
 		}
 
