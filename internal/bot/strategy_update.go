@@ -13,6 +13,7 @@ import (
 func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instruments []string, candlesAmount int) {
 	update := func() {
 		for _, instId := range instruments {
+			// Обновляем основные индикаторы для торгового таймфрейма
 			for _, tf := range configs.BotCurrentConfig.Timeframes {
 				candles, err := b.client.GetCandlesticks(instId, tf, candlesAmount)
 				if err != nil {
@@ -30,6 +31,32 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					ATR:        atr,
 					IsUptrend:  isUptrend,
 				})
+			}
+
+			// Обновляем MACD для MACD таймфрейма
+			if configs.BotCurrentConfig.MacdTimeframe != "" {
+				macdCandles, err := b.client.GetCandlesticks(instId, configs.BotCurrentConfig.MacdTimeframe, candlesAmount)
+				if err != nil {
+					log.Log.Error("[strategyUpdater] Ошибка получения свечей для MACD", "inst", instId, "tf", configs.BotCurrentConfig.MacdTimeframe, "error", err)
+					continue
+				}
+
+				// Рассчитываем MACD с параметрами из конфигурации
+				macdData := indicators.CalculateMACD(macdCandles, configs.BotCurrentConfig.MacdFastPeriod, configs.BotCurrentConfig.MacdSlowPeriod, configs.BotCurrentConfig.MacdSignalPeriod)
+				if len(macdData) > 0 {
+					lastMacd := macdData[len(macdData)-1]
+					buySignal, sellSignal := indicators.GetMACDSignal(macdData)
+
+					cache.Get().SetMACDData(instId, cache.MACDIndicatorData{
+						MACD:      lastMacd.MACD,
+						Signal:    lastMacd.Signal,
+						Histogram: lastMacd.Histogram,
+						BuySignal:  buySignal,
+						SellSignal: sellSignal,
+					})
+
+					log.Log.Debug("[strategyUpdater] MACD обновлен", "inst", instId, "MACD", lastMacd.MACD, "Signal", lastMacd.Signal, "BuySignal", buySignal, "SellSignal", sellSignal)
+				}
 			}
 		}
 	}

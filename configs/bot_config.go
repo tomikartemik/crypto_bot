@@ -16,6 +16,10 @@ type BotConfig struct {
 	Multiplier        float64  `json:"multiplier"`
 	MinOrderSize      float64  `json:"min_order_size"`
 	Timeframes        []string `json:"timeframes"`
+	MacdTimeframe     string   `json:"macd_timeframe"`
+	MacdFastPeriod    int      `json:"macd_fast_period"`
+	MacdSlowPeriod    int      `json:"macd_slow_period"`
+	MacdSignalPeriod  int      `json:"macd_signal_period"`
 	CandlesAmount     int      `json:"candles_amount"`
 	RiskPercent       float64  `json:"risk_percent"`
 	CCY               string   `json:"ccy"`

@@ -235,6 +235,25 @@ func (t *Trader) monitorStop() {
 			}
 		}
 
+		// Проверяем MACD сигналы для закрытия позиции
+		if configs.BotCurrentConfig.MacdTimeframe != "" {
+			macdData, ok := cache.Get().GetMACDData(instId)
+			if ok {
+				// Если у нас открыт LONG, а MACD дает сигнал на продажу
+				if t.positions[instId].PosSide == "long" && macdData.SellSignal {
+					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт LONG по MACD сигналу на продажу: Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
+					t.closePosition(instId)
+					continue
+				}
+				// Если у нас открыт SHORT, а MACD дает сигнал на покупку
+				if t.positions[instId].PosSide == "short" && macdData.BuySignal {
+					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт SHORT по MACD сигналу на покупку: Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
+					t.closePosition(instId)
+					continue
+				}
+			}
+		}
+
 		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s BestStop=%.6f NewStop=%.6f",
 			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.bestStopPrice[instId], newStopPrice))
 

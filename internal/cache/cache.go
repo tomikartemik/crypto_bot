@@ -10,12 +10,21 @@ type IndicatorData struct {
 	IsUptrend  bool
 }
 
+type MACDIndicatorData struct {
+	MACD     float64
+	Signal   float64
+	Histogram float64
+	BuySignal  bool
+	SellSignal bool
+}
+
 type Cache struct {
 	mu             sync.RWMutex
 	prices         map[string]float64                  // instrumentId -> price
 	lotSizes       map[string]float64                  // instrumentId -> lotSize
 	contractValues map[string]float64                  // instrumentId -> ctVal
 	indicators     map[string]map[string]IndicatorData // instrumentId -> TF -> данные
+	macdIndicators  map[string]MACDIndicatorData        // instrumentId -> MACD данные
 }
 
 var (
@@ -30,6 +39,7 @@ func Get() *Cache {
 			lotSizes:       make(map[string]float64),
 			indicators:     make(map[string]map[string]IndicatorData),
 			contractValues: make(map[string]float64),
+			macdIndicators: make(map[string]MACDIndicatorData),
 		}
 	})
 	return instance
@@ -95,5 +105,20 @@ func (c *Cache) GetIndicatorData(instrumentId string, tf string) (IndicatorData,
 		return IndicatorData{}, false
 	}
 	data, exists := tfs[tf]
+	return data, exists
+}
+
+// ======== MACD INDICATORS ========
+
+func (c *Cache) SetMACDData(instrumentId string, data MACDIndicatorData) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.macdIndicators[instrumentId] = data
+}
+
+func (c *Cache) GetMACDData(instrumentId string) (MACDIndicatorData, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	data, exists := c.macdIndicators[instrumentId]
 	return data, exists
 }
