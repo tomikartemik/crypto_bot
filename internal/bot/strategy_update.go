@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/kuromii5/supertrend_trade_bot/configs"
@@ -56,6 +57,14 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					})
 
 					log.Log.Debug("[strategyUpdater] MACD обновлен", "inst", instId, "MACD", lastMacd.MACD, "Signal", lastMacd.Signal, "BuySignal", buySignal, "SellSignal", sellSignal)
+					
+					// Дополнительное логирование для отслеживания сигналов
+					if buySignal {
+						log.Log.Info(fmt.Sprintf("[strategyUpdater] MACD BUY сигнал для %s: MACD=%.6f Signal=%.6f", instId, lastMacd.MACD, lastMacd.Signal))
+					}
+					if sellSignal {
+						log.Log.Info(fmt.Sprintf("[strategyUpdater] MACD SELL сигнал для %s: MACD=%.6f Signal=%.6f", instId, lastMacd.MACD, lastMacd.Signal))
+					}
 				}
 			}
 		}
