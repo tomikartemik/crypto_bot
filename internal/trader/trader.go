@@ -231,9 +231,11 @@ func (t *Trader) monitorStop() {
 
 		// ПРИОРИТЕТ 1: Проверяем MACD сигналы для закрытия позиции (самый высокий приоритет)
 		if configs.BotCurrentConfig.MacdTimeframe != "" {
+			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Проверяем MACD данные, MacdTimeframe=%s", t.cfg.APIKey, instId, configs.BotCurrentConfig.MacdTimeframe))
+			
 			macdData, ok := cache.Get().GetMACDData(instId)
 			if ok {
-				log.Log.Debug(fmt.Sprintf("[Trader %s][%s] MACD данные: MACD=%.6f Signal=%.6f BuySignal=%v SellSignal=%v PosSide=%s", 
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] MACD данные найдены: MACD=%.6f Signal=%.6f BuySignal=%v SellSignal=%v PosSide=%s", 
 					t.cfg.APIKey, instId, macdData.MACD, macdData.Signal, macdData.BuySignal, macdData.SellSignal, t.positions[instId].PosSide))
 				
 				// Если у нас открыт LONG, а MACD дает сигнал на продажу
@@ -249,8 +251,10 @@ func (t *Trader) monitorStop() {
 					continue
 				}
 			} else {
-				log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Нет MACD данных в кэше", t.cfg.APIKey, instId))
+				log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет MACD данных в кэше для %s", t.cfg.APIKey, instId, instId))
 			}
+		} else {
+			log.Log.Warn(fmt.Sprintf("[Trader %s][%s] MacdTimeframe не установлен в конфигурации", t.cfg.APIKey, instId))
 		}
 
 		// ПРИОРИТЕТ 2: Проверяем трейлинг-стоп

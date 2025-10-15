@@ -36,14 +36,20 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 
 			// Обновляем MACD для MACD таймфрейма
 			if configs.BotCurrentConfig.MacdTimeframe != "" {
+				log.Log.Debug("[strategyUpdater] Начинаем расчет MACD", "inst", instId, "tf", configs.BotCurrentConfig.MacdTimeframe, "candlesAmount", candlesAmount)
+				
 				macdCandles, err := b.client.GetCandlesticks(instId, configs.BotCurrentConfig.MacdTimeframe, candlesAmount)
 				if err != nil {
 					log.Log.Error("[strategyUpdater] Ошибка получения свечей для MACD", "inst", instId, "tf", configs.BotCurrentConfig.MacdTimeframe, "error", err)
 					continue
 				}
 
+				log.Log.Debug("[strategyUpdater] Получены свечи для MACD", "inst", instId, "candlesCount", len(macdCandles))
+
 				// Рассчитываем MACD с параметрами из конфигурации
 				macdData := indicators.CalculateMACD(macdCandles, configs.BotCurrentConfig.MacdFastPeriod, configs.BotCurrentConfig.MacdSlowPeriod, configs.BotCurrentConfig.MacdSignalPeriod)
+				log.Log.Debug("[strategyUpdater] MACD рассчитан", "inst", instId, "macdDataLength", len(macdData))
+				
 				if len(macdData) > 0 {
 					lastMacd := macdData[len(macdData)-1]
 					buySignal, sellSignal := indicators.GetMACDSignal(macdData)
@@ -56,7 +62,7 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 						SellSignal: sellSignal,
 					})
 
-					log.Log.Debug("[strategyUpdater] MACD обновлен", "inst", instId, "MACD", lastMacd.MACD, "Signal", lastMacd.Signal, "BuySignal", buySignal, "SellSignal", sellSignal)
+					log.Log.Info("[strategyUpdater] MACD данные сохранены в кэш", "inst", instId, "MACD", lastMacd.MACD, "Signal", lastMacd.Signal, "BuySignal", buySignal, "SellSignal", sellSignal)
 					
 					// Дополнительное логирование для отслеживания сигналов
 					if buySignal {
@@ -65,7 +71,11 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					if sellSignal {
 						log.Log.Info(fmt.Sprintf("[strategyUpdater] MACD SELL сигнал для %s: MACD=%.6f Signal=%.6f", instId, lastMacd.MACD, lastMacd.Signal))
 					}
+				} else {
+					log.Log.Warn("[strategyUpdater] MACD данные пусты", "inst", instId, "candlesCount", len(macdCandles), "requiredMin", configs.BotCurrentConfig.MacdSlowPeriod+configs.BotCurrentConfig.MacdSignalPeriod)
 				}
+			} else {
+				log.Log.Warn("[strategyUpdater] MacdTimeframe не установлен в конфигурации")
 			}
 		}
 	}

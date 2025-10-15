@@ -27,6 +27,9 @@ func New() *Bot {
 		os.Exit(1)
 	}
 	configs.BotCurrentConfig = config
+	
+	// Логируем MACD конфигурацию для диагностики
+	log.Log.Info("MACD конфигурация", "MacdTimeframe", config.MacdTimeframe, "MacdFastPeriod", config.MacdFastPeriod, "MacdSlowPeriod", config.MacdSlowPeriod, "MacdSignalPeriod", config.MacdSignalPeriod)
 
 	traderConfigs, err := configs.LoadConfigs("trader_configs.json")
 	if err != nil {

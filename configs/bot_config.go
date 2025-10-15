@@ -40,6 +40,17 @@ func LoadBotConfig(filename string) (BotConfig, error) {
 		return BotConfig{}, err
 	}
 
+	// Устанавливаем значения по умолчанию для MACD, если они не указаны
+	if config.MacdFastPeriod == 0 {
+		config.MacdFastPeriod = 12
+	}
+	if config.MacdSlowPeriod == 0 {
+		config.MacdSlowPeriod = 26
+	}
+	if config.MacdSignalPeriod == 0 {
+		config.MacdSignalPeriod = 9
+	}
+
 	if config.DebugMode {
 		log.Log = *log.NewLogger(slog.LevelDebug)
 	} else {
