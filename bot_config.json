@@ -9,7 +9,7 @@
     "trading_pairs": ["ADA-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
     "atr_multiplier_stop": 3.0,
     "timeframes": ["30m"],
-    "macd_timeframe": "1h",
+    "macd_timeframe": "1H",
     "macd_fast_period": 12,
     "macd_slow_period": 26,
     "macd_signal_period": 9,
