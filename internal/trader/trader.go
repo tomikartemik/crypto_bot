@@ -9,6 +9,7 @@ import (
 	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger"
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger/okx"
+	"github.com/kuromii5/supertrend_trade_bot/internal/indicators"
 	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 	"github.com/kuromii5/supertrend_trade_bot/internal/models"
 )
@@ -16,6 +17,7 @@ import (
 type Trader struct {
 	cfg                configs.TraderConfig
 	Client             exchanger.TradingAccount
+	marketClient       exchanger.MarketProvider
 	lastIsUptrend      map[string]*bool
 	actedOnTrend       map[string]*bool
 	isPositionOpen     map[string]bool
@@ -28,10 +30,12 @@ type Trader struct {
 
 func NewTrader(cfg configs.TraderConfig) *Trader {
 	client := okx.NewClient(cfg.APIKey, cfg.APISecret, cfg.Passphrase)
+	marketClient := okx.NewBotClient()
 
 	return &Trader{
 		cfg:                cfg,
 		Client:             client,
+		marketClient:       marketClient,
 		lastIsUptrend:      make(map[string]*bool),
 		actedOnTrend:       make(map[string]*bool),
 		isPositionOpen:     make(map[string]bool),
@@ -57,6 +61,11 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] lastIsUptrend оставляем nil (нет данных в кэше)", t.cfg.APIKey, instId))
 		}
 		t.actedOnTrend[instId] = nil
+	}
+
+	// Обновляем MACD данные для всех пар
+	for _, instId := range configs.BotCurrentConfig.TradingPairs {
+		t.updateMACDData(instId)
 	}
 
 	log.Log.Info(fmt.Sprintf("[Trader %s] Выполнение initial trade() для всех пар", t.cfg.APIKey))
@@ -93,6 +102,10 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 				t.checkMACDSignals(inst)
 			}
 		case <-tickerTrade.C:
+			// Обновляем MACD данные перед торговлей
+			for _, instId := range configs.BotCurrentConfig.TradingPairs {
+				t.updateMACDData(instId)
+			}
 			t.trade()
 		case <-tickerTrailing.C:
 			t.monitorStop()
@@ -350,6 +363,50 @@ func (t *Trader) closePosition(instId string) {
 		t.actedOnTrend[instId] = nil
 	} else {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))
+	}
+}
+
+func (t *Trader) updateMACDData(instId string) {
+	if configs.BotCurrentConfig.MacdTimeframe == "" {
+		return
+	}
+
+	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Обновляем MACD данные", t.cfg.APIKey, instId))
+	
+	// Получаем свечи для MACD таймфрейма
+	macdCandles, err := t.marketClient.GetCandlesticks(instId, configs.BotCurrentConfig.MacdTimeframe, configs.BotCurrentConfig.CandlesAmount)
+	if err != nil {
+		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка получения свечей для MACD: %v", t.cfg.APIKey, instId, err))
+		return
+	}
+
+	if len(macdCandles) == 0 {
+		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет свечей для MACD", t.cfg.APIKey, instId))
+		return
+	}
+
+	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Получено %d свечей для MACD", t.cfg.APIKey, instId, len(macdCandles)))
+
+	// Рассчитываем MACD
+	macdData := indicators.CalculateMACD(macdCandles, configs.BotCurrentConfig.MacdFastPeriod, configs.BotCurrentConfig.MacdSlowPeriod, configs.BotCurrentConfig.MacdSignalPeriod)
+	
+	if len(macdData) > 0 {
+		lastMacd := macdData[len(macdData)-1]
+		buySignal, sellSignal := indicators.GetMACDSignal(macdData)
+
+		cache.Get().SetMACDData(instId, cache.MACDIndicatorData{
+			MACD:      lastMacd.MACD,
+			Signal:    lastMacd.Signal,
+			Histogram: lastMacd.Histogram,
+			BuySignal:  buySignal,
+			SellSignal: sellSignal,
+		})
+
+		log.Log.Info(fmt.Sprintf("[Trader %s][%s] MACD обновлен: MACD=%.6f Signal=%.6f BuySignal=%v SellSignal=%v", 
+			t.cfg.APIKey, instId, lastMacd.MACD, lastMacd.Signal, buySignal, sellSignal))
+	} else {
+		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] MACD данные пусты, требуется минимум %d свечей", 
+			t.cfg.APIKey, instId, configs.BotCurrentConfig.MacdSlowPeriod+configs.BotCurrentConfig.MacdSignalPeriod))
 	}
 }
 
