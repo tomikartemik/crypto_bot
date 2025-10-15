@@ -114,11 +114,43 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (t *Trader) trade() {
+	// Создаем сводку трендов для всех монет
+	t.logTrendsSummary()
+	
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
 		if err := t.tradeFor(instId); err != nil {
 			log.Log.Error("[tradeFor] Ошибка в трейде", "error", err)
 		}
 	}
+}
+
+func (t *Trader) logTrendsSummary() {
+	var trends []string
+	var macdSignals []string
+	
+	for _, instId := range configs.BotCurrentConfig.TradingPairs {
+		// Supertrend тренд
+		if data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0]); ok {
+			trend := "DOWN"
+			if data.IsUptrend {
+				trend = "UP"
+			}
+			trends = append(trends, fmt.Sprintf("%s:%s", instId, trend))
+		}
+		
+		// MACD сигналы
+		if macdData, ok := cache.Get().GetMACDData(instId); ok {
+			signal := "NEUTRAL"
+			if macdData.BuySignal {
+				signal = "BUY"
+			} else if macdData.SellSignal {
+				signal = "SELL"
+			}
+			macdSignals = append(macdSignals, fmt.Sprintf("%s:%s", instId, signal))
+		}
+	}
+	
+	log.Log.Info("Тренды", "Supertrend", trends, "MACD", macdSignals)
 }
 
 func (t *Trader) tradeFor(instId string) error {
@@ -132,22 +164,18 @@ func (t *Trader) tradeFor(instId string) error {
 		return fmt.Errorf("[Trader %s][%s] Нет актуальной цены в кэше — пропуск шага", t.cfg.APIKey, instId)
 	}
 
-	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] tradeFor(): time=%s Price=%.6f Supertrend=%.6f ATR=%.6f IsUptrend=%v", t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, data.Supertrend, data.ATR, data.IsUptrend))
-	t.lastIndicatorAt[instId] = time.Now()
-
 	tfIsUptrend := data.IsUptrend
 
 	if t.lastIsUptrend[instId] == nil {
 		t.lastIsUptrend[instId] = new(bool)
 		*t.lastIsUptrend[instId] = tfIsUptrend
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Первая инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, tfIsUptrend))
 		return nil
 	}
 
 	prevTrend := *t.lastIsUptrend[instId]
 	trendChanged := tfIsUptrend != prevTrend
 	if trendChanged {
-		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Обнаружена смена тренда: было %v → стало %v", t.cfg.APIKey, instId, prevTrend, tfIsUptrend))
+		log.Log.Info("Смена тренда", "pair", instId, "было", prevTrend, "стало", tfIsUptrend)
 	}
 
 		// Проверяем MACD сигналы для закрытия позиции (если позиция открыта)
@@ -174,56 +202,54 @@ func (t *Trader) tradeFor(instId string) error {
 		}
 
 		if trendChanged && t.isPositionOpen[instId] {
-			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрываем позицию перед сменой тренда", t.cfg.APIKey, instId))
+			log.Log.Info("Закрываем позицию перед сменой тренда", "pair", instId)
 			t.closePosition(instId)
 		}
 
-	if trendChanged {
-		tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
-		if err != nil {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err))
-		} else {
-			if tfIsUptrend {
-				stopLossPrice := t.calculateStopLoss(instId, price, true)
-				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Попытка открыть LONG (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice))
-				if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
-					log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err))
-				} else {
-					t.positions[instId] = models.Position{
-						InstId:        instId,
-						PosSide:       "long",
-						TradeSize:     tradeSize,
-						EntryPrice:    price,
-						StopLossPrice: stopLossPrice,
-					}
-					t.isPositionOpen[instId] = true
-					b := tfIsUptrend
-					t.actedOnTrend[instId] = new(bool)
-					*t.actedOnTrend[instId] = b
-					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
-				}
+		if trendChanged {
+			tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
+			if err != nil {
+				log.Log.Error("Ошибка получения размера сделки", "pair", instId, "error", err)
 			} else {
-				stopLossPrice := t.calculateStopLoss(instId, price, false)
-				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Попытка открыть SHORT (1-я свеча нового тренда): Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice))
-				if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
-					log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err))
-				} else {
-					t.positions[instId] = models.Position{
-						InstId:        instId,
-						PosSide:       "short",
-						TradeSize:     tradeSize,
-						EntryPrice:    price,
-						StopLossPrice: stopLossPrice,
+				if tfIsUptrend {
+					stopLossPrice := t.calculateStopLoss(instId, price, true)
+					if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
+						log.Log.Error("Ошибка открытия LONG", "pair", instId, "error", err)
+					} else {
+						t.positions[instId] = models.Position{
+							InstId:        instId,
+							PosSide:       "long",
+							TradeSize:     tradeSize,
+							EntryPrice:    price,
+							StopLossPrice: stopLossPrice,
+						}
+						t.isPositionOpen[instId] = true
+						b := tfIsUptrend
+						t.actedOnTrend[instId] = new(bool)
+						*t.actedOnTrend[instId] = b
+						log.Log.Info("Открыт LONG", "pair", instId, "entry", price, "stop", stopLossPrice, "size", tradeSize)
 					}
-					t.isPositionOpen[instId] = true
-					b := tfIsUptrend
-					t.actedOnTrend[instId] = new(bool)
-					*t.actedOnTrend[instId] = b
-					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
+				} else {
+					stopLossPrice := t.calculateStopLoss(instId, price, false)
+					if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
+						log.Log.Error("Ошибка открытия SHORT", "pair", instId, "error", err)
+					} else {
+						t.positions[instId] = models.Position{
+							InstId:        instId,
+							PosSide:       "short",
+							TradeSize:     tradeSize,
+							EntryPrice:    price,
+							StopLossPrice: stopLossPrice,
+						}
+						t.isPositionOpen[instId] = true
+						b := tfIsUptrend
+						t.actedOnTrend[instId] = new(bool)
+						*t.actedOnTrend[instId] = b
+						log.Log.Info("Открыт SHORT", "pair", instId, "entry", price, "stop", stopLossPrice, "size", tradeSize)
+					}
 				}
 			}
 		}
-	}
 
 	*t.lastIsUptrend[instId] = tfIsUptrend
 	t.lastIndicatorAt[instId] = time.Now()
@@ -238,42 +264,31 @@ func (t *Trader) monitorStop() {
 
 		price, ok := cache.Get().GetPrice(instId)
 		if !ok {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет цены для monitorStop", t.cfg.APIKey, instId))
 			continue
 		}
 
 		// ПРИОРИТЕТ 1: Проверяем MACD сигналы для закрытия позиции (самый высокий приоритет)
 		if configs.BotCurrentConfig.MacdTimeframe != "" {
-			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Проверяем MACD данные, MacdTimeframe=%s", t.cfg.APIKey, instId, configs.BotCurrentConfig.MacdTimeframe))
-			
 			macdData, ok := cache.Get().GetMACDData(instId)
 			if ok {
-				log.Log.Info(fmt.Sprintf("[Trader %s][%s] MACD данные найдены: MACD=%.6f Signal=%.6f BuySignal=%v SellSignal=%v PosSide=%s", 
-					t.cfg.APIKey, instId, macdData.MACD, macdData.Signal, macdData.BuySignal, macdData.SellSignal, t.positions[instId].PosSide))
-				
 				// Если у нас открыт LONG, а MACD дает сигнал на продажу
 				if t.positions[instId].PosSide == "long" && macdData.SellSignal {
-					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт LONG по MACD сигналу на продажу: Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
+					log.Log.Info("Закрыт LONG по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
 					t.closePosition(instId)
 					continue
 				}
 				// Если у нас открыт SHORT, а MACD дает сигнал на покупку
 				if t.positions[instId].PosSide == "short" && macdData.BuySignal {
-					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт SHORT по MACD сигналу на покупку: Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
+					log.Log.Info("Закрыт SHORT по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
 					t.closePosition(instId)
 					continue
 				}
-			} else {
-				log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет MACD данных в кэше для %s", t.cfg.APIKey, instId, instId))
 			}
-		} else {
-			log.Log.Warn(fmt.Sprintf("[Trader %s][%s] MacdTimeframe не установлен в конфигурации", t.cfg.APIKey, instId))
 		}
 
 		// ПРИОРИТЕТ 2: Проверяем трейлинг-стоп
 		data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 		if !ok {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет данных индикаторов в monitorStop", t.cfg.APIKey, instId))
 			continue
 		}
 
@@ -288,7 +303,6 @@ func (t *Trader) monitorStop() {
 
 		if t.bestStopPrice[instId] == 0 {
 			t.bestStopPrice[instId] = newStopPrice
-			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Инициализация стоп-лосса: %.6f", t.cfg.APIKey, instId, newStopPrice))
 		} else {
 			shouldUpdate := false
 			if t.positions[instId].PosSide == "long" {
@@ -300,22 +314,23 @@ func (t *Trader) monitorStop() {
 			if shouldUpdate {
 				oldStop := t.bestStopPrice[instId]
 				t.bestStopPrice[instId] = newStopPrice
-				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Улучшен стоп-лосс: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
+				log.Log.Info("Улучшен стоп-лосс", "pair", instId, "old", oldStop, "new", newStopPrice)
 			}
 		}
 
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s BestStop=%.6f NewStop=%.6f",
-			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.bestStopPrice[instId], newStopPrice))
+		// Логируем информацию о позиции каждые 10 секунд
+		pnl := 100.0 * (price - t.positions[instId].EntryPrice) / t.positions[instId].EntryPrice * dir
+		log.Log.Info("Позиция", "pair", instId, "side", t.positions[instId].PosSide, "entry", t.positions[instId].EntryPrice, 
+			"current", price, "stop", t.bestStopPrice[instId], "pnl", fmt.Sprintf("%.2f%%", pnl))
 
 		if dir*(price-t.bestStopPrice[instId]) <= 0 {
-			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.bestStopPrice[instId], price))
+			log.Log.Info("Закрыт по стоп-лоссу", "pair", instId, "side", t.positions[instId].PosSide, "entry", t.positions[instId].EntryPrice, "stop", t.bestStopPrice[instId], "price", price)
 			t.closePosition(instId)
 		}
 	}
 }
 
 func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool) float64 {
-	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Расчёт стоп-лосса: Price=%.6f IsUptrend=%v", t.cfg.APIKey, instId, price, isUptrend))
 	data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
 	if !ok || data.ATR == 0 {
 		if isUptrend {
@@ -332,7 +347,6 @@ func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool)
 
 func (t *Trader) closePosition(instId string) {
 	if !t.isPositionOpen[instId] {
-		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] closePosition вызван, но позиции нет", t.cfg.APIKey, instId))
 		return
 	}
 
@@ -348,21 +362,19 @@ func (t *Trader) closePosition(instId string) {
 
 	price, ok := cache.Get().GetPrice(instId)
 	if !ok {
-		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Не удалось получить цену для расчёта PnL при закрытии, используем entry", t.cfg.APIKey, instId))
 		price = entry
 	}
 
 	pnl := 100.0 * (price - entry) / entry * dir
-	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрытие позиции: PosSide=%s Entry=%.6f Current=%.6f Size=%.6f PnL=%.3f%%", t.cfg.APIKey, instId, t.positions[instId].PosSide, entry, price, size, pnl))
+	log.Log.Info("Закрытие позиции", "pair", instId, "side", t.positions[instId].PosSide, "entry", entry, "current", price, "size", size, "pnl", fmt.Sprintf("%.2f%%", pnl))
 
 	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, size); err == nil {
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId))
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
 		delete(t.bestStopPrice, instId)
 		t.actedOnTrend[instId] = nil
 	} else {
-		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))
+		log.Log.Error("Ошибка закрытия позиции", "pair", instId, "error", err)
 	}
 }
 
@@ -371,21 +383,17 @@ func (t *Trader) updateMACDData(instId string) {
 		return
 	}
 
-	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Обновляем MACD данные", t.cfg.APIKey, instId))
-	
 	// Получаем свечи для MACD таймфрейма
 	macdCandles, err := t.marketClient.GetCandlesticks(instId, configs.BotCurrentConfig.MacdTimeframe, configs.BotCurrentConfig.CandlesAmount)
 	if err != nil {
-		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка получения свечей для MACD: %v", t.cfg.APIKey, instId, err))
+		log.Log.Error("Ошибка получения свечей MACD", "pair", instId, "error", err)
 		return
 	}
 
 	if len(macdCandles) == 0 {
-		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет свечей для MACD", t.cfg.APIKey, instId))
+		log.Log.Warn("Нет свечей для MACD", "pair", instId)
 		return
 	}
-
-	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Получено %d свечей для MACD", t.cfg.APIKey, instId, len(macdCandles)))
 
 	// Рассчитываем MACD
 	macdData := indicators.CalculateMACD(macdCandles, configs.BotCurrentConfig.MacdFastPeriod, configs.BotCurrentConfig.MacdSlowPeriod, configs.BotCurrentConfig.MacdSignalPeriod)
@@ -402,11 +410,9 @@ func (t *Trader) updateMACDData(instId string) {
 			SellSignal: sellSignal,
 		})
 
-		log.Log.Info(fmt.Sprintf("[Trader %s][%s] MACD обновлен: MACD=%.6f Signal=%.6f BuySignal=%v SellSignal=%v", 
-			t.cfg.APIKey, instId, lastMacd.MACD, lastMacd.Signal, buySignal, sellSignal))
+		log.Log.Debug("MACD обновлен", "pair", instId, "macd", lastMacd.MACD, "signal", lastMacd.Signal, "buy", buySignal, "sell", sellSignal)
 	} else {
-		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] MACD данные пусты, требуется минимум %d свечей", 
-			t.cfg.APIKey, instId, configs.BotCurrentConfig.MacdSlowPeriod+configs.BotCurrentConfig.MacdSignalPeriod))
+		log.Log.Warn("MACD данные пусты", "pair", instId, "required", configs.BotCurrentConfig.MacdSlowPeriod+configs.BotCurrentConfig.MacdSignalPeriod)
 	}
 }
 
@@ -427,13 +433,13 @@ func (t *Trader) checkMACDSignals(instId string) {
 
 	// Если у нас открыт LONG, а MACD дает сигнал на продажу
 	if t.positions[instId].PosSide == "long" && macdData.SellSignal {
-		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт LONG по MACD сигналу на продажу (проверка): Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
+		log.Log.Info("Закрыт LONG по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
 		t.closePosition(instId)
 		return
 	}
 	// Если у нас открыт SHORT, а MACD дает сигнал на покупку
 	if t.positions[instId].PosSide == "short" && macdData.BuySignal {
-		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт SHORT по MACD сигналу на покупку (проверка): Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
+		log.Log.Info("Закрыт SHORT по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
 		t.closePosition(instId)
 		return
 	}
