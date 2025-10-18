@@ -89,6 +89,10 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	tickerTrailing := time.NewTicker(10 * time.Second)
 	defer tickerTrailing.Stop()
 
+	// Добавляем тикер для более частой проверки MACD сигналов
+	tickerMACD := time.NewTicker(1 * time.Minute)
+	defer tickerMACD.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -109,6 +113,18 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 			t.trade()
 		case <-tickerTrailing.C:
 			t.monitorStop()
+		case <-tickerMACD.C:
+			// Проверяем MACD сигналы каждую минуту для открытых позиций
+			if configs.BotCurrentConfig.MacdTimeframe != "" {
+				for _, instId := range configs.BotCurrentConfig.TradingPairs {
+					if t.isPositionOpen[instId] {
+						// Обновляем MACD данные
+						t.updateMACDData(instId)
+						// Проверяем сигналы
+						t.checkMACDSignals(instId)
+					}
+				}
+			}
 		}
 	}
 }
@@ -182,6 +198,9 @@ func (t *Trader) tradeFor(instId string) error {
 		if t.isPositionOpen[instId] && configs.BotCurrentConfig.MacdTimeframe != "" {
 			macdData, ok := cache.Get().GetMACDData(instId)
 			if ok {
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Проверка MACD сигналов: PosSide=%s, BuySignal=%v, SellSignal=%v, MACD=%.6f, Signal=%.6f", 
+					t.cfg.APIKey, instId, t.positions[instId].PosSide, macdData.BuySignal, macdData.SellSignal, macdData.MACD, macdData.Signal))
+				
 				// Если у нас открыт LONG, а MACD дает сигнал на продажу
 				if t.positions[instId].PosSide == "long" && macdData.SellSignal {
 					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт LONG по MACD сигналу на продажу (основной цикл): Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
@@ -198,6 +217,8 @@ func (t *Trader) tradeFor(instId string) error {
 					t.lastIndicatorAt[instId] = time.Now()
 					return nil
 				}
+			} else {
+				log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет MACD данных в кэше", t.cfg.APIKey, instId))
 			}
 		}
 
@@ -400,7 +421,14 @@ func (t *Trader) updateMACDData(instId string) {
 	
 	if len(macdData) > 0 {
 		lastMacd := macdData[len(macdData)-1]
-		buySignal, sellSignal := indicators.GetMACDSignal(macdData)
+		
+		// Используем улучшенную логику MACD сигналов
+		buySignal, sellSignal := indicators.GetMACDSignalAdvanced(macdData)
+		
+		// Если улучшенная логика не дала сигнала, используем базовую
+		if !buySignal && !sellSignal {
+			buySignal, sellSignal = indicators.GetMACDSignal(macdData)
+		}
 
 		cache.Get().SetMACDData(instId, cache.MACDIndicatorData{
 			MACD:      lastMacd.MACD,
@@ -410,7 +438,7 @@ func (t *Trader) updateMACDData(instId string) {
 			SellSignal: sellSignal,
 		})
 
-		log.Log.Debug("MACD обновлен", "pair", instId, "macd", lastMacd.MACD, "signal", lastMacd.Signal, "buy", buySignal, "sell", sellSignal)
+		log.Log.Info("MACD обновлен", "pair", instId, "macd", lastMacd.MACD, "signal", lastMacd.Signal, "histogram", lastMacd.Histogram, "buy", buySignal, "sell", sellSignal)
 	} else {
 		log.Log.Warn("MACD данные пусты", "pair", instId, "required", configs.BotCurrentConfig.MacdSlowPeriod+configs.BotCurrentConfig.MacdSignalPeriod)
 	}
@@ -423,13 +451,18 @@ func (t *Trader) checkMACDSignals(instId string) {
 
 	price, ok := cache.Get().GetPrice(instId)
 	if !ok {
+		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет цены для проверки MACD сигналов", t.cfg.APIKey, instId))
 		return
 	}
 
 	macdData, ok := cache.Get().GetMACDData(instId)
 	if !ok {
+		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] Нет MACD данных для проверки сигналов", t.cfg.APIKey, instId))
 		return
 	}
+
+	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Проверка MACD сигналов (checkMACDSignals): PosSide=%s, BuySignal=%v, SellSignal=%v, MACD=%.6f, Signal=%.6f", 
+		t.cfg.APIKey, instId, t.positions[instId].PosSide, macdData.BuySignal, macdData.SellSignal, macdData.MACD, macdData.Signal))
 
 	// Если у нас открыт LONG, а MACD дает сигнал на продажу
 	if t.positions[instId].PosSide == "long" && macdData.SellSignal {

@@ -107,3 +107,33 @@ func GetMACDSignal(macdData []MACDData) (bool, bool) {
 
 	return buySignal, sellSignal
 }
+
+// GetMACDSignalAdvanced определяет сигнал MACD с дополнительными условиями
+// Учитывает не только пересечение, но и направление гистограммы
+func GetMACDSignalAdvanced(macdData []MACDData) (bool, bool) {
+	if len(macdData) < 3 {
+		return false, false
+	}
+
+	// Берем последние три значения для более точного анализа
+	last := macdData[len(macdData)-1]
+	prev := macdData[len(macdData)-2]
+	prev2 := macdData[len(macdData)-3]
+
+	// Проверяем, что у нас есть валидные данные
+	if math.IsNaN(last.MACD) || math.IsNaN(last.Signal) || 
+	   math.IsNaN(prev.MACD) || math.IsNaN(prev.Signal) ||
+	   math.IsNaN(prev2.MACD) || math.IsNaN(prev2.Signal) {
+		return false, false
+	}
+
+	// Сигнал на покупку: MACD пересекает сигнальную линию снизу вверх И гистограмма растет
+	buySignal := prev.MACD <= prev.Signal && last.MACD > last.Signal && 
+	             last.Histogram > prev.Histogram && prev.Histogram > prev2.Histogram
+	
+	// Сигнал на продажу: MACD пересекает сигнальную линию сверху вниз И гистограмма падает
+	sellSignal := prev.MACD >= prev.Signal && last.MACD < last.Signal && 
+	              last.Histogram < prev.Histogram && prev.Histogram < prev2.Histogram
+
+	return buySignal, sellSignal
+}

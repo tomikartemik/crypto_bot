@@ -28,7 +28,7 @@ func NewBotClient() *MarketClient {
 
 func (c *MarketClient) GetCandlesticks(instId string, interval string, limit int) ([]models.Candlestick, error) {
 	url := fmt.Sprintf("%s/api/v5/market/candles?instId=%s&bar=%s&limit=%d", configs.BotCurrentConfig.BaseURL, instId, interval, limit)
-	
+
 	log.Log.Debug("GetCandlesticks запрос", "url", url, "instId", instId, "interval", interval, "limit", limit)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -50,18 +50,16 @@ func (c *MarketClient) GetCandlesticks(instId string, interval string, limit int
 	if err != nil {
 		return nil, fmt.Errorf("ошибка чтения ответа: %w", err)
 	}
-	
-	log.Log.Debug("GetCandlesticks ответ", "statusCode", resp.StatusCode, "body", string(body))
 
 	var result struct {
-		Code string       `json:"code"`
-		Msg  string       `json:"msg"`
-		Data [][]string   `json:"data"`
+		Code string     `json:"code"`
+		Msg  string     `json:"msg"`
+		Data [][]string `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
 	}
-	
+
 	// Проверяем код ошибки API
 	if result.Code != "0" && result.Code != "" {
 		return nil, fmt.Errorf("API ошибка: код=%s, сообщение=%s", result.Code, result.Msg)
