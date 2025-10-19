@@ -12,6 +12,7 @@ import (
 	"github.com/kuromii5/supertrend_trade_bot/internal/indicators"
 	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 	"github.com/kuromii5/supertrend_trade_bot/internal/models"
+	"github.com/kuromii5/supertrend_trade_bot/internal/notifications"
 )
 
 type Trader struct {
@@ -26,11 +27,14 @@ type Trader struct {
 	updateCh           chan string
 	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
+	telegramService    *notifications.TelegramService
 }
 
 func NewTrader(cfg configs.TraderConfig) *Trader {
 	client := okx.NewClient(cfg.APIKey, cfg.APISecret, cfg.Passphrase)
 	marketClient := okx.NewBotClient()
+	telegramService := notifications.NewTelegramService()
+	telegramService.Initialize()
 
 	return &Trader{
 		cfg:                cfg,
@@ -44,11 +48,17 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 		updateCh:           make(chan string, 128),
 		lastIndicatorAt:    make(map[string]time.Time),
 		trendChangeCounter: make(map[string]int),
+		telegramService:    telegramService,
 	}
 }
 
 func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	log.Log.Debug(fmt.Sprintf("[Trader %s] Начало торговли (tf=%s)", t.cfg.APIKey, interval))
+	
+	// Отправляем уведомление о запуске бота
+	if err := t.telegramService.SendStartupNotification(); err != nil {
+		log.Log.Error("Ошибка отправки уведомления о запуске", "error", err)
+	}
 
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
 		if data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0]); ok {
@@ -204,7 +214,7 @@ func (t *Trader) tradeFor(instId string) error {
 				// Если у нас открыт LONG, а MACD дает сигнал на продажу
 				if t.positions[instId].PosSide == "long" && macdData.SellSignal {
 					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт LONG по MACD сигналу на продажу (основной цикл): Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
-					t.closePosition(instId)
+					t.closePositionWithReason(instId, "MACD сигнал на продажу")
 					*t.lastIsUptrend[instId] = tfIsUptrend
 					t.lastIndicatorAt[instId] = time.Now()
 					return nil
@@ -212,7 +222,7 @@ func (t *Trader) tradeFor(instId string) error {
 				// Если у нас открыт SHORT, а MACD дает сигнал на покупку
 				if t.positions[instId].PosSide == "short" && macdData.BuySignal {
 					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт SHORT по MACD сигналу на покупку (основной цикл): Entry=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].EntryPrice, price))
-					t.closePosition(instId)
+					t.closePositionWithReason(instId, "MACD сигнал на покупку")
 					*t.lastIsUptrend[instId] = tfIsUptrend
 					t.lastIndicatorAt[instId] = time.Now()
 					return nil
@@ -224,7 +234,7 @@ func (t *Trader) tradeFor(instId string) error {
 
 		if trendChanged && t.isPositionOpen[instId] {
 			log.Log.Info("Закрываем позицию перед сменой тренда", "pair", instId)
-			t.closePosition(instId)
+			t.closePositionWithReason(instId, "Смена тренда")
 		}
 
 		if trendChanged {
@@ -236,6 +246,10 @@ func (t *Trader) tradeFor(instId string) error {
 					stopLossPrice := t.calculateStopLoss(instId, price, true)
 					if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
 						log.Log.Error("Ошибка открытия LONG", "pair", instId, "error", err)
+						// Отправляем уведомление об ошибке
+						if err := t.telegramService.SendErrorNotification(instId, fmt.Sprintf("Ошибка открытия LONG: %v", err)); err != nil {
+							log.Log.Error("Ошибка отправки уведомления об ошибке", "error", err)
+						}
 					} else {
 						t.positions[instId] = models.Position{
 							InstId:        instId,
@@ -249,11 +263,20 @@ func (t *Trader) tradeFor(instId string) error {
 						t.actedOnTrend[instId] = new(bool)
 						*t.actedOnTrend[instId] = b
 						log.Log.Info("Открыт LONG", "pair", instId, "entry", price, "stop", stopLossPrice, "size", tradeSize)
+						
+						// Отправляем уведомление об открытии позиции
+						if err := t.telegramService.SendTradeNotification(instId, "long", "open", "Смена тренда на восходящий", price, price, 0); err != nil {
+							log.Log.Error("Ошибка отправки уведомления об открытии LONG", "error", err)
+						}
 					}
 				} else {
 					stopLossPrice := t.calculateStopLoss(instId, price, false)
 					if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
 						log.Log.Error("Ошибка открытия SHORT", "pair", instId, "error", err)
+						// Отправляем уведомление об ошибке
+						if err := t.telegramService.SendErrorNotification(instId, fmt.Sprintf("Ошибка открытия SHORT: %v", err)); err != nil {
+							log.Log.Error("Ошибка отправки уведомления об ошибке", "error", err)
+						}
 					} else {
 						t.positions[instId] = models.Position{
 							InstId:        instId,
@@ -267,6 +290,11 @@ func (t *Trader) tradeFor(instId string) error {
 						t.actedOnTrend[instId] = new(bool)
 						*t.actedOnTrend[instId] = b
 						log.Log.Info("Открыт SHORT", "pair", instId, "entry", price, "stop", stopLossPrice, "size", tradeSize)
+						
+						// Отправляем уведомление об открытии позиции
+						if err := t.telegramService.SendTradeNotification(instId, "short", "open", "Смена тренда на нисходящий", price, price, 0); err != nil {
+							log.Log.Error("Ошибка отправки уведомления об открытии SHORT", "error", err)
+						}
 					}
 				}
 			}
@@ -295,13 +323,13 @@ func (t *Trader) monitorStop() {
 				// Если у нас открыт LONG, а MACD дает сигнал на продажу
 				if t.positions[instId].PosSide == "long" && macdData.SellSignal {
 					log.Log.Info("Закрыт LONG по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
-					t.closePosition(instId)
+					t.closePositionWithReason(instId, "MACD сигнал на продажу (трейлинг)")
 					continue
 				}
 				// Если у нас открыт SHORT, а MACD дает сигнал на покупку
 				if t.positions[instId].PosSide == "short" && macdData.BuySignal {
 					log.Log.Info("Закрыт SHORT по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
-					t.closePosition(instId)
+					t.closePositionWithReason(instId, "MACD сигнал на покупку (трейлинг)")
 					continue
 				}
 			}
@@ -346,7 +374,7 @@ func (t *Trader) monitorStop() {
 
 		if dir*(price-t.bestStopPrice[instId]) <= 0 {
 			log.Log.Info("Закрыт по стоп-лоссу", "pair", instId, "side", t.positions[instId].PosSide, "entry", t.positions[instId].EntryPrice, "stop", t.bestStopPrice[instId], "price", price)
-			t.closePosition(instId)
+			t.closePositionWithReason(instId, "Трейлинг-стоп")
 		}
 	}
 }
@@ -367,6 +395,10 @@ func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool)
 }
 
 func (t *Trader) closePosition(instId string) {
+	t.closePositionWithReason(instId, "Неизвестная причина")
+}
+
+func (t *Trader) closePositionWithReason(instId string, reason string) {
 	if !t.isPositionOpen[instId] {
 		return
 	}
@@ -387,15 +419,25 @@ func (t *Trader) closePosition(instId string) {
 	}
 
 	pnl := 100.0 * (price - entry) / entry * dir
-	log.Log.Info("Закрытие позиции", "pair", instId, "side", t.positions[instId].PosSide, "entry", entry, "current", price, "size", size, "pnl", fmt.Sprintf("%.2f%%", pnl))
+	log.Log.Info("Закрытие позиции", "pair", instId, "side", t.positions[instId].PosSide, "entry", entry, "current", price, "size", size, "pnl", fmt.Sprintf("%.2f%%", pnl), "reason", reason)
 
 	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, size); err == nil {
 		t.isPositionOpen[instId] = false
+		
+		// Отправляем уведомление о закрытии позиции
+		if err := t.telegramService.SendTradeNotification(instId, t.positions[instId].PosSide, "close", reason, entry, price, pnl); err != nil {
+			log.Log.Error("Ошибка отправки уведомления о закрытии позиции", "error", err)
+		}
+		
 		delete(t.positions, instId)
 		delete(t.bestStopPrice, instId)
 		t.actedOnTrend[instId] = nil
 	} else {
 		log.Log.Error("Ошибка закрытия позиции", "pair", instId, "error", err)
+		// Отправляем уведомление об ошибке закрытия
+		if err := t.telegramService.SendErrorNotification(instId, fmt.Sprintf("Ошибка закрытия позиции: %v", err)); err != nil {
+			log.Log.Error("Ошибка отправки уведомления об ошибке закрытия", "error", err)
+		}
 	}
 }
 
@@ -467,19 +509,19 @@ func (t *Trader) checkMACDSignals(instId string) {
 	// Если у нас открыт LONG, а MACD дает сигнал на продажу
 	if t.positions[instId].PosSide == "long" && macdData.SellSignal {
 		log.Log.Info("Закрыт LONG по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
-		t.closePosition(instId)
+		t.closePositionWithReason(instId, "MACD сигнал на продажу")
 		return
 	}
 	// Если у нас открыт SHORT, а MACD дает сигнал на покупку
 	if t.positions[instId].PosSide == "short" && macdData.BuySignal {
 		log.Log.Info("Закрыт SHORT по MACD", "pair", instId, "entry", t.positions[instId].EntryPrice, "price", price)
-		t.closePosition(instId)
+		t.closePositionWithReason(instId, "MACD сигнал на покупку")
 		return
 	}
 }
 
 func (t *Trader) Stop() {
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		t.closePosition(instId)
+		t.closePositionWithReason(instId, "Остановка бота")
 	}
 }
