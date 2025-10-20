@@ -24,7 +24,7 @@ type BotConfig struct {
 	DebugMode         bool     `json:"debug_mode"`
 	Margin            string   `json:"margin"`
 	TelegramBotToken  string   `json:"telegram_bot_token"`
-	TelegramChatID    string   `json:"telegram_chat_id"`
+	TelegramUserID    string   `json:"telegram_user_id"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {

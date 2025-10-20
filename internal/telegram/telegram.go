@@ -8,11 +8,11 @@ import (
 )
 
 type TelegramNotifier struct {
-	bot    *tgbotapi.BotAPI
-	chatID string
+	bot     *tgbotapi.BotAPI
+	userID  string
 }
 
-func NewTelegramNotifier(botToken, chatID string) (*TelegramNotifier, error) {
+func NewTelegramNotifier(botToken, userID string) (*TelegramNotifier, error) {
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка создания Telegram бота: %v", err)
@@ -22,17 +22,17 @@ func NewTelegramNotifier(botToken, chatID string) (*TelegramNotifier, error) {
 
 	return &TelegramNotifier{
 		bot:    bot,
-		chatID: chatID,
+		userID: userID,
 	}, nil
 }
 
 func (tn *TelegramNotifier) SendMessage(message string) error {
-	chatID, err := strconv.ParseInt(tn.chatID, 10, 64)
+	userID, err := strconv.ParseInt(tn.userID, 10, 64)
 	if err != nil {
-		return fmt.Errorf("ошибка парсинга chatID: %v", err)
+		return fmt.Errorf("ошибка парсинга userID: %v", err)
 	}
 	
-	msg := tgbotapi.NewMessage(chatID, message)
+	msg := tgbotapi.NewMessage(userID, message)
 	msg.ParseMode = "HTML"
 	
 	_, err = tn.bot.Send(msg)

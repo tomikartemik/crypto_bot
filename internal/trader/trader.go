@@ -32,9 +32,9 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 
 	// Инициализируем Telegram уведомления если токены настроены
 	var telegramNotifier *telegram.TelegramNotifier
-	if configs.BotCurrentConfig.TelegramBotToken != "" && configs.BotCurrentConfig.TelegramChatID != "" {
+	if configs.BotCurrentConfig.TelegramBotToken != "" && configs.BotCurrentConfig.TelegramUserID != "" {
 		var err error
-		telegramNotifier, err = telegram.NewTelegramNotifier(configs.BotCurrentConfig.TelegramBotToken, configs.BotCurrentConfig.TelegramChatID)
+		telegramNotifier, err = telegram.NewTelegramNotifier(configs.BotCurrentConfig.TelegramBotToken, configs.BotCurrentConfig.TelegramUserID)
 		if err != nil {
 			log.Log.Warn("Не удалось инициализировать Telegram уведомления", "error", err)
 		} else {
