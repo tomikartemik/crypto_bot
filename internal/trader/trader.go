@@ -11,6 +11,7 @@ import (
 	"github.com/kuromii5/supertrend_trade_bot/internal/exchanger/okx"
 	"github.com/kuromii5/supertrend_trade_bot/internal/log"
 	"github.com/kuromii5/supertrend_trade_bot/internal/models"
+	"github.com/kuromii5/supertrend_trade_bot/internal/telegram"
 )
 
 type Trader struct {
@@ -20,14 +21,26 @@ type Trader struct {
 	actedOnTrend       map[string]*bool
 	isPositionOpen     map[string]bool
 	positions          map[string]models.Position
-	bestStopPrice      map[string]float64
 	updateCh           chan string
 	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
+	telegramNotifier   *telegram.TelegramNotifier
 }
 
 func NewTrader(cfg configs.TraderConfig) *Trader {
 	client := okx.NewClient(cfg.APIKey, cfg.APISecret, cfg.Passphrase)
+
+	// Инициализируем Telegram уведомления если токены настроены
+	var telegramNotifier *telegram.TelegramNotifier
+	if configs.BotCurrentConfig.TelegramBotToken != "" && configs.BotCurrentConfig.TelegramChatID != "" {
+		var err error
+		telegramNotifier, err = telegram.NewTelegramNotifier(configs.BotCurrentConfig.TelegramBotToken, configs.BotCurrentConfig.TelegramChatID)
+		if err != nil {
+			log.Log.Warn("Не удалось инициализировать Telegram уведомления", "error", err)
+		} else {
+			log.Log.Info("Telegram уведомления инициализированы")
+		}
+	}
 
 	return &Trader{
 		cfg:                cfg,
@@ -36,10 +49,10 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 		actedOnTrend:       make(map[string]*bool),
 		isPositionOpen:     make(map[string]bool),
 		positions:          make(map[string]models.Position),
-		bestStopPrice:      make(map[string]float64),
 		updateCh:           make(chan string, 128),
 		lastIndicatorAt:    make(map[string]time.Time),
 		trendChangeCounter: make(map[string]int),
+		telegramNotifier:   telegramNotifier,
 	}
 }
 
@@ -77,9 +90,6 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	// Сразу обрабатываем сигнал на границе свечи
 	t.trade()
 
-	tickerTrailing := time.NewTicker(10 * time.Second)
-	defer tickerTrailing.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,8 +100,6 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 			t.tradeFor(inst)
 		case <-tickerTrade.C:
 			t.trade()
-		case <-tickerTrailing.C:
-			t.monitorStop()
 		}
 	}
 }
@@ -131,6 +139,13 @@ func (t *Trader) tradeFor(instId string) error {
 	trendChanged := tfIsUptrend != prevTrend
 	if trendChanged {
 		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Обнаружена смена тренда: было %v → стало %v", t.cfg.APIKey, instId, prevTrend, tfIsUptrend))
+		
+		// Отправляем уведомление о смене тренда
+		if t.telegramNotifier != nil {
+			if err := t.telegramNotifier.SendTrendChangeNotification(instId, prevTrend, tfIsUptrend); err != nil {
+				log.Log.Error("Ошибка отправки уведомления о смене тренда", "error", err)
+			}
+		}
 	}
 
 	if trendChanged && t.isPositionOpen[instId] {
@@ -161,6 +176,13 @@ func (t *Trader) tradeFor(instId string) error {
 					t.actedOnTrend[instId] = new(bool)
 					*t.actedOnTrend[instId] = b
 					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
+					
+					// Отправляем уведомление об открытии позиции
+					if t.telegramNotifier != nil {
+						if err := t.telegramNotifier.SendTradeNotification(instId, "open", "long", price, tradeSize, 0); err != nil {
+							log.Log.Error("Ошибка отправки уведомления об открытии позиции", "error", err)
+						}
+					}
 				}
 			} else {
 				stopLossPrice := t.calculateStopLoss(instId, price, false)
@@ -180,6 +202,13 @@ func (t *Trader) tradeFor(instId string) error {
 					t.actedOnTrend[instId] = new(bool)
 					*t.actedOnTrend[instId] = b
 					log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
+					
+					// Отправляем уведомление об открытии позиции
+					if t.telegramNotifier != nil {
+						if err := t.telegramNotifier.SendTradeNotification(instId, "open", "short", price, tradeSize, 0); err != nil {
+							log.Log.Error("Ошибка отправки уведомления об открытии позиции", "error", err)
+						}
+					}
 				}
 			}
 		}
@@ -190,60 +219,6 @@ func (t *Trader) tradeFor(instId string) error {
 	return nil
 }
 
-func (t *Trader) monitorStop() {
-	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		if !t.isPositionOpen[instId] {
-			continue
-		}
-
-		price, ok := cache.Get().GetPrice(instId)
-		if !ok {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет цены для monitorStop", t.cfg.APIKey, instId))
-			continue
-		}
-
-		data, ok := cache.Get().GetIndicatorData(instId, configs.BotCurrentConfig.Timeframes[0])
-		if !ok {
-			log.Log.Error(fmt.Sprintf("[Trader %s][%s] Нет данных индикаторов в monitorStop", t.cfg.APIKey, instId))
-			continue
-		}
-
-		atr := data.ATR
-		dir := 1.0
-		if t.positions[instId].PosSide == "short" {
-			dir = -1
-		}
-
-		stopDistance := atr * configs.BotCurrentConfig.ATRMultiplierStop
-		newStopPrice := price - dir*stopDistance
-
-		if t.bestStopPrice[instId] == 0 {
-			t.bestStopPrice[instId] = newStopPrice
-			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Инициализация стоп-лосса: %.6f", t.cfg.APIKey, instId, newStopPrice))
-		} else {
-			shouldUpdate := false
-			if t.positions[instId].PosSide == "long" {
-				shouldUpdate = newStopPrice > t.bestStopPrice[instId]
-			} else {
-				shouldUpdate = newStopPrice < t.bestStopPrice[instId]
-			}
-
-			if shouldUpdate {
-				oldStop := t.bestStopPrice[instId]
-				t.bestStopPrice[instId] = newStopPrice
-				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Улучшен стоп-лосс: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
-			}
-		}
-
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s BestStop=%.6f NewStop=%.6f",
-			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.bestStopPrice[instId], newStopPrice))
-
-		if dir*(price-t.bestStopPrice[instId]) <= 0 {
-			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.bestStopPrice[instId], price))
-			t.closePosition(instId)
-		}
-	}
-}
 
 func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool) float64 {
 	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Расчёт стоп-лосса: Price=%.6f IsUptrend=%v", t.cfg.APIKey, instId, price, isUptrend))
@@ -288,9 +263,16 @@ func (t *Trader) closePosition(instId string) {
 
 	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, size); err == nil {
 		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId))
+		
+		// Отправляем уведомление о закрытии позиции
+		if t.telegramNotifier != nil {
+			if err := t.telegramNotifier.SendTradeNotification(instId, "close", t.positions[instId].PosSide, price, size, pnl); err != nil {
+				log.Log.Error("Ошибка отправки уведомления о закрытии позиции", "error", err)
+			}
+		}
+		
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
-		delete(t.bestStopPrice, instId)
 		t.actedOnTrend[instId] = nil
 	} else {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))

@@ -23,6 +23,8 @@ type BotConfig struct {
 	Leverage          int      `json:"leverage"`
 	DebugMode         bool     `json:"debug_mode"`
 	Margin            string   `json:"margin"`
+	TelegramBotToken  string   `json:"telegram_bot_token"`
+	TelegramChatID    string   `json:"telegram_chat_id"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {

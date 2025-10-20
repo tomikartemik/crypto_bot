@@ -1,0 +1,18 @@
+{
+  "base_url": "https://www.okx.com",
+  "candles_amount": 200,
+  "atr_period": 10,
+  "multiplier": 3.0,
+  "min_order_size": 0.0,
+  "ccy": "USDT",
+  "is_simulated": true,
+  "trading_pairs": ["ADA-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
+  "atr_multiplier_stop": 3.0,
+  "timeframes": ["5m"],
+  "risk_percent": 0.1,
+  "leverage": 10,
+  "debug_mode": true,
+  "margin": "cross",
+  "telegram_bot_token": "YOUR_BOT_TOKEN_HERE",
+  "telegram_chat_id": "YOUR_CHAT_ID_HERE"
+}
