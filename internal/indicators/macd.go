@@ -108,6 +108,36 @@ func GetMACDSignal(macdData []MACDData) (bool, bool) {
 	return buySignal, sellSignal
 }
 
+// GetMACDSignalTradingView определяет сигнал MACD по логике TradingView
+// Использует пересечение гистограммы (MACD - Signal) с нулевой линией
+func GetMACDSignalTradingView(macdData []MACDData) (bool, bool) {
+	if len(macdData) < 2 {
+		return false, false
+	}
+
+	// Берем последние два значения для определения тренда
+	last := macdData[len(macdData)-1]
+	prev := macdData[len(macdData)-2]
+
+	// Проверяем, что у нас есть валидные данные
+	if math.IsNaN(last.MACD) || math.IsNaN(last.Signal) || 
+	   math.IsNaN(prev.MACD) || math.IsNaN(prev.Signal) {
+		return false, false
+	}
+
+	// Вычисляем гистограмму (delta) как в TradingView
+	lastHistogram := last.MACD - last.Signal
+	prevHistogram := prev.MACD - prev.Signal
+
+	// Сигнал на покупку: гистограмма пересекает ноль снизу вверх (crossover)
+	buySignal := prevHistogram <= 0 && lastHistogram > 0
+	
+	// Сигнал на продажу: гистограмма пересекает ноль сверху вниз (crossunder)
+	sellSignal := prevHistogram >= 0 && lastHistogram < 0
+
+	return buySignal, sellSignal
+}
+
 // GetMACDSignalAdvanced определяет сигнал MACD с дополнительными условиями
 // Учитывает не только пересечение, но и направление гистограммы
 func GetMACDSignalAdvanced(macdData []MACDData) (bool, bool) {

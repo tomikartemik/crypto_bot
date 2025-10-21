@@ -464,10 +464,10 @@ func (t *Trader) updateMACDData(instId string) {
 	if len(macdData) > 0 {
 		lastMacd := macdData[len(macdData)-1]
 		
-		// Используем улучшенную логику MACD сигналов
-		buySignal, sellSignal := indicators.GetMACDSignalAdvanced(macdData)
+		// Используем логику MACD как в TradingView (пересечение гистограммы с нулем)
+		buySignal, sellSignal := indicators.GetMACDSignalTradingView(macdData)
 		
-		// Если улучшенная логика не дала сигнала, используем базовую
+		// Если TradingView логика не дала сигнала, используем базовую
 		if !buySignal && !sellSignal {
 			buySignal, sellSignal = indicators.GetMACDSignal(macdData)
 		}
@@ -481,6 +481,15 @@ func (t *Trader) updateMACDData(instId string) {
 		})
 
 		log.Log.Info("MACD обновлен", "pair", instId, "macd", lastMacd.MACD, "signal", lastMacd.Signal, "histogram", lastMacd.Histogram, "buy", buySignal, "sell", sellSignal)
+		
+		// Дополнительное логирование для отладки
+		if len(macdData) >= 2 {
+			prev := macdData[len(macdData)-2]
+			log.Log.Debug("MACD детали", "pair", instId, 
+				"prev_macd", prev.MACD, "prev_signal", prev.Signal, "prev_histogram", prev.Histogram,
+				"curr_macd", lastMacd.MACD, "curr_signal", lastMacd.Signal, "curr_histogram", lastMacd.Histogram,
+				"histogram_cross", fmt.Sprintf("prev: %.6f, curr: %.6f", prev.Histogram, lastMacd.Histogram))
+		}
 	} else {
 		log.Log.Warn("MACD данные пусты", "pair", instId, "required", configs.BotCurrentConfig.MacdSlowPeriod+configs.BotCurrentConfig.MacdSignalPeriod)
 	}
