@@ -5,7 +5,7 @@
     "multiplier": 3.0,
     "min_order_size": 0.0,
     "ccy": "USDT",
-    "is_simulated": true,
+    "is_simulated": false,
     "trading_pairs": ["ADA-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
     "atr_multiplier_stop": 3.0,
     "timeframes": ["5m"],
