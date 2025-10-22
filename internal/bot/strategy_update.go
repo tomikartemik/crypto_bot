@@ -24,12 +24,36 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 				ATRs := indicators.CalculateATR(candles, configs.BotCurrentConfig.ATRPeriod)
 				atr := ATRs[len(ATRs)-1]
 
-				stValue, isUptrend := indicators.CalculateSupertrend(candles[configs.BotCurrentConfig.ATRPeriod-1:], ATRs[configs.BotCurrentConfig.ATRPeriod-1:], configs.BotCurrentConfig.ATRPeriod, configs.BotCurrentConfig.Multiplier)
+				// Используем новую функцию с детектированием сигналов для мгновенного входа
+				stResult, buySignal, sellSignal := indicators.CalculateSupertrendWithSignals(
+					candles[configs.BotCurrentConfig.ATRPeriod-1:], 
+					ATRs[configs.BotCurrentConfig.ATRPeriod-1:], 
+					configs.BotCurrentConfig.ATRPeriod, 
+					configs.BotCurrentConfig.Multiplier,
+				)
+
+				// Логируем сигналы смены тренда и уведомляем трейдеров
+				if buySignal {
+					log.Log.Info("🟢 BUY SIGNAL: Supertrend сменился на восходящий", 
+						"inst", instId, "tf", tf, "value", stResult.Value)
+					// Уведомляем всех трейдеров о смене тренда для мгновенного входа
+					for _, trader := range b.traders {
+						trader.NotifyTrendChange(instId)
+					}
+				}
+				if sellSignal {
+					log.Log.Info("🔴 SELL SIGNAL: Supertrend сменился на нисходящий", 
+						"inst", instId, "tf", tf, "value", stResult.Value)
+					// Уведомляем всех трейдеров о смене тренда для мгновенного входа
+					for _, trader := range b.traders {
+						trader.NotifyTrendChange(instId)
+					}
+				}
 
 				cache.Get().SetIndicatorData(instId, tf, cache.IndicatorData{
-					Supertrend: stValue,
+					Supertrend: stResult.Value,
 					ATR:        atr,
-					IsUptrend:  isUptrend,
+					IsUptrend:  stResult.IsUptrend,
 				})
 			}
 
