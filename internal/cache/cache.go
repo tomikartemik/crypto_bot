@@ -8,6 +8,7 @@ type IndicatorData struct {
 	Supertrend float64
 	ATR        float64
 	IsUptrend  bool
+	Trend      int
 }
 
 type Cache struct {

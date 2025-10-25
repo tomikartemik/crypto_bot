@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kuromii5/supertrend_trade_bot/configs"
+	"github.com/tomikartemik/crypto_bot/configs"
 )
 
 func signRequest(method, path, body, timestamp, apiSecret string) string {

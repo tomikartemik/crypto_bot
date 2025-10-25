@@ -3,7 +3,7 @@ package indicators
 import (
 	"math"
 
-	"github.com/kuromii5/supertrend_trade_bot/internal/models"
+	"github.com/tomikartemik/crypto_bot/internal/models"
 )
 
 // SupertrendResult содержит результат расчета Supertrend

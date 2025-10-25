@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/kuromii5/supertrend_trade_bot/internal/log"
+	"github.com/tomikartemik/crypto_bot/internal/log"
 )
 
 type BotConfig struct {
@@ -14,6 +14,8 @@ type BotConfig struct {
 	ATRPeriod         int      `json:"atr_period"`
 	ATRMultiplierStop float64  `json:"atr_multiplier_stop"`
 	Multiplier        float64  `json:"multiplier"`
+	LTFMultiplier     float64  `json:"ltf_multiplier"`
+	HTFMultiplier     float64  `json:"htf_multiplier"`
 	MinOrderSize      float64  `json:"min_order_size"`
 	Timeframes        []string `json:"timeframes"`
 	CandlesAmount     int      `json:"candles_amount"`

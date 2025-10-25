@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/kuromii5/supertrend_trade_bot/internal/bot"
-	"github.com/kuromii5/supertrend_trade_bot/internal/log"
+	"github.com/tomikartemik/crypto_bot/internal/bot"
+	"github.com/tomikartemik/crypto_bot/internal/log"
 )
 
 func main() {

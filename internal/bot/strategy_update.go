@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/kuromii5/supertrend_trade_bot/configs"
-	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
-	"github.com/kuromii5/supertrend_trade_bot/internal/indicators"
-	"github.com/kuromii5/supertrend_trade_bot/internal/log"
+	"github.com/tomikartemik/crypto_bot/configs"
+	"github.com/tomikartemik/crypto_bot/internal/cache"
+	"github.com/tomikartemik/crypto_bot/internal/indicators"
+	"github.com/tomikartemik/crypto_bot/internal/log"
 )
 
 func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instruments []string, candlesAmount int) {
@@ -23,17 +23,19 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 				ATRs := indicators.CalculateATR(candles, configs.BotCurrentConfig.ATRPeriod)
 				atr := ATRs[len(ATRs)-1]
 
+				multiplier := resolveMultiplierForTF(tf)
+
 				// Используем новую функцию с детектированием сигналов
 				stResult, buySignal, sellSignal := indicators.CalculateSupertrendWithSignals(
-					candles[configs.BotCurrentConfig.ATRPeriod-1:], 
-					ATRs[configs.BotCurrentConfig.ATRPeriod-1:], 
-					configs.BotCurrentConfig.ATRPeriod, 
-					configs.BotCurrentConfig.Multiplier,
+					candles[configs.BotCurrentConfig.ATRPeriod-1:],
+					ATRs[configs.BotCurrentConfig.ATRPeriod-1:],
+					configs.BotCurrentConfig.ATRPeriod,
+					multiplier,
 				)
 
 				// Логируем сигналы смены тренда и уведомляем трейдеров
 				if buySignal {
-					log.Log.Info("🟢 BUY SIGNAL: Supertrend сменился на восходящий", 
+					log.Log.Info("🟢 BUY SIGNAL: Supertrend сменился на восходящий",
 						"inst", instId, "tf", tf, "value", stResult.Value)
 					// Уведомляем всех трейдеров о смене тренда
 					for _, trader := range b.traders {
@@ -41,7 +43,7 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					}
 				}
 				if sellSignal {
-					log.Log.Info("🔴 SELL SIGNAL: Supertrend сменился на нисходящий", 
+					log.Log.Info("🔴 SELL SIGNAL: Supertrend сменился на нисходящий",
 						"inst", instId, "tf", tf, "value", stResult.Value)
 					// Уведомляем всех трейдеров о смене тренда
 					for _, trader := range b.traders {
@@ -53,6 +55,7 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					Supertrend: stResult.Value,
 					ATR:        atr,
 					IsUptrend:  stResult.IsUptrend,
+					Trend:      stResult.Trend,
 				})
 			}
 		}
@@ -80,4 +83,18 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 			update()
 		}
 	}
+}
+
+func resolveMultiplierForTF(tf string) float64 {
+	cfg := configs.BotCurrentConfig
+	if len(cfg.Timeframes) > 0 && tf == cfg.Timeframes[0] && cfg.LTFMultiplier > 0 {
+		return cfg.LTFMultiplier
+	}
+	if len(cfg.Timeframes) > 1 && tf == cfg.Timeframes[1] && cfg.HTFMultiplier > 0 {
+		return cfg.HTFMultiplier
+	}
+	if cfg.Multiplier > 0 {
+		return cfg.Multiplier
+	}
+	return 3.0
 }

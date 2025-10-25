@@ -3,7 +3,7 @@ package exchanger
 import (
 	"context"
 
-	"github.com/kuromii5/supertrend_trade_bot/internal/models"
+	"github.com/tomikartemik/crypto_bot/internal/models"
 )
 
 type MarketProvider interface {

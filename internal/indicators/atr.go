@@ -3,7 +3,7 @@ package indicators
 import (
 	"math"
 
-	"github.com/kuromii5/supertrend_trade_bot/internal/models"
+	"github.com/tomikartemik/crypto_bot/internal/models"
 )
 
 func CalculateATR(c []models.Candlestick, period int) []float64 {

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kuromii5/supertrend_trade_bot/configs"
-	"github.com/kuromii5/supertrend_trade_bot/internal/cache"
-	"github.com/kuromii5/supertrend_trade_bot/internal/log"
-	"github.com/kuromii5/supertrend_trade_bot/internal/utils"
+	"github.com/tomikartemik/crypto_bot/configs"
+	"github.com/tomikartemik/crypto_bot/internal/cache"
+	"github.com/tomikartemik/crypto_bot/internal/log"
+	"github.com/tomikartemik/crypto_bot/internal/utils"
 )
 
 type Client struct {

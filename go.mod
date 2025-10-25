@@ -1,4 +1,4 @@
-module github.com/kuromii5/supertrend_trade_bot
+module github.com/tomikartemik/crypto_bot
 
 go 1.24.2
 
