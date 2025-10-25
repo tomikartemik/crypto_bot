@@ -20,16 +20,31 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					continue
 				}
 
-				ATRs := indicators.CalculateATR(candles, configs.BotCurrentConfig.ATRPeriod)
+				period := resolveATRPeriodForTF(tf)
+				if period <= 0 {
+					log.Log.Warn("ATR period не задан, используем значение по умолчанию 10", "tf", tf)
+					period = 10
+				}
+
+				if len(candles) < period {
+					log.Log.Warn("Недостаточно свечей для расчёта по выбранному периоду", "tf", tf, "period", period, "have", len(candles))
+					continue
+				}
+
+				ATRs := indicators.CalculateATR(candles, period)
+				if len(ATRs) < period {
+					log.Log.Warn("Недостаточно ATR данных для расчёта", "tf", tf, "period", period, "have", len(ATRs))
+					continue
+				}
 				atr := ATRs[len(ATRs)-1]
 
 				multiplier := resolveMultiplierForTF(tf)
 
 				// Используем новую функцию с детектированием сигналов
 				stResult, buySignal, sellSignal := indicators.CalculateSupertrendWithSignals(
-					candles[configs.BotCurrentConfig.ATRPeriod-1:],
-					ATRs[configs.BotCurrentConfig.ATRPeriod-1:],
-					configs.BotCurrentConfig.ATRPeriod,
+					candles[period-1:],
+					ATRs[period-1:],
+					period,
 					multiplier,
 				)
 
@@ -87,14 +102,20 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 
 func resolveMultiplierForTF(tf string) float64 {
 	cfg := configs.BotCurrentConfig
-	if len(cfg.Timeframes) > 0 && tf == cfg.Timeframes[0] && cfg.LTFMultiplier > 0 {
-		return cfg.LTFMultiplier
-	}
-	if len(cfg.Timeframes) > 1 && tf == cfg.Timeframes[1] && cfg.HTFMultiplier > 0 {
-		return cfg.HTFMultiplier
-	}
-	if cfg.Multiplier > 0 {
-		return cfg.Multiplier
+	if cfg.TimeframeSettings != nil {
+		if setting, ok := cfg.TimeframeSettings[tf]; ok && setting.Multiplier > 0 {
+			return setting.Multiplier
+		}
 	}
 	return 3.0
+}
+
+func resolveATRPeriodForTF(tf string) int {
+	cfg := configs.BotCurrentConfig
+	if cfg.TimeframeSettings != nil {
+		if setting, ok := cfg.TimeframeSettings[tf]; ok && setting.ATRPeriod > 0 {
+			return setting.ATRPeriod
+		}
+	}
+	return 10
 }

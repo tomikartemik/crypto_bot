@@ -1,16 +1,16 @@
 {
     "base_url": "https://www.okx.com",
     "candles_amount": 200,
-    "atr_period": 10,
-    "multiplier": 3.0,
-    "ltf_multiplier": 3.0,
-    "htf_multiplier": 3.0,
+    "timeframe_settings": {
+        "15m": { "atr_period": 10, "multiplier": 2.0 },
+        "30m": { "atr_period": 14, "multiplier": 2.6 }
+    },
     "min_order_size": 0.0,
     "ccy": "USDT",
     "is_simulated": false,
     "trading_pairs": ["ADA-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
     "atr_multiplier_stop": 3.0,
-    "timeframes": ["5m", "15m"],
+    "timeframes": ["15m", "30m"],
     "risk_percent": 0.1,
     "leverage": 10,
     "debug_mode": true,
