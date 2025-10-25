@@ -1,0 +1,23 @@
+time=2025-10-21T22:29:33.634+03:00 level=INFO msg="=== Запуск бота ==="
+time=2025-10-21T22:29:33.634+03:00 level=DEBUG msg="Trading pairs" pairs="[ADA-USDT-SWAP ETH-USDT-SWAP SOL-USDT-SWAP]"
+time=2025-10-21T22:29:33.634+03:00 level=DEBUG msg="Подписка на websocket успешна"
+time=2025-10-21T22:29:33.634+03:00 level=DEBUG msg="Запрос информации по инструменту" instId=ADA-USDT-SWAP
+time=2025-10-21T22:29:34.109+03:00 level=DEBUG msg="Данные по инструменту" instId=ADA-USDT-SWAP MinSize=0.1 CtVal=100
+time=2025-10-21T22:29:35.187+03:00 level=DEBUG msg="Запрос информации по инструменту" instId=ETH-USDT-SWAP
+time=2025-10-21T22:29:35.477+03:00 level=DEBUG msg="Данные по инструменту" instId=ETH-USDT-SWAP MinSize=0.01 CtVal=0.1
+time=2025-10-21T22:29:36.546+03:00 level=DEBUG msg="Запрос информации по инструменту" instId=SOL-USDT-SWAP
+time=2025-10-21T22:29:36.832+03:00 level=DEBUG msg="Данные по инструменту" instId=SOL-USDT-SWAP MinSize=0.01 CtVal=1
+time=2025-10-21T22:29:37.923+03:00 level=INFO msg="Запуск трейдера" trader=*trader.Trader
+time=2025-10-21T22:29:37.923+03:00 level=DEBUG msg="Ожидаем до следующей свечи" delay=22.076906s now=2025-10-21T22:29:37+03:00 next=2025-10-21T22:30:00+03:00
+time=2025-10-21T22:29:37.923+03:00 level=DEBUG msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9] Начало торговли (tf=5m0s)"
+time=2025-10-21T22:29:37.923+03:00 level=DEBUG msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][ADA-USDT-SWAP] lastIsUptrend оставляем nil (нет данных в кэше)"
+time=2025-10-21T22:29:37.923+03:00 level=DEBUG msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][ETH-USDT-SWAP] lastIsUptrend оставляем nil (нет данных в кэше)"
+time=2025-10-21T22:29:37.923+03:00 level=DEBUG msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][SOL-USDT-SWAP] lastIsUptrend оставляем nil (нет данных в кэше)"
+time=2025-10-21T22:29:37.923+03:00 level=INFO msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9] Выполнение initial trade() для всех пар"
+time=2025-10-21T22:29:37.923+03:00 level=ERROR msg="[tradeFor] Ошибка в трейде" error="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][ADA-USDT-SWAP] Нет данных индикаторов в кэше"
+time=2025-10-21T22:29:37.924+03:00 level=ERROR msg="[tradeFor] Ошибка в трейде" error="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][ETH-USDT-SWAP] Нет данных индикаторов в кэше"
+time=2025-10-21T22:29:37.924+03:00 level=ERROR msg="[tradeFor] Ошибка в трейде" error="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][SOL-USDT-SWAP] Нет данных индикаторов в кэше"
+time=2025-10-21T22:29:43.677+03:00 level=INFO msg="Получен сигнал, остановка бота..."
+time=2025-10-21T22:29:43.677+03:00 level=WARN msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][ADA-USDT-SWAP] closePosition вызван, но позиции нет"
+time=2025-10-21T22:29:43.677+03:00 level=WARN msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][ETH-USDT-SWAP] closePosition вызван, но позиции нет"
+time=2025-10-21T22:29:43.677+03:00 level=WARN msg="[Trader f5d4b0f2-6e33-40ce-b2a0-3cf9b088ceb9][SOL-USDT-SWAP] closePosition вызван, но позиции нет"

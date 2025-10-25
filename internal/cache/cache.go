@@ -4,10 +4,30 @@ import (
 	"sync"
 )
 
+type MACDData struct {
+	Value                 float64
+	Signal                float64
+	Histogram             float64
+	SmoothedHistogram     float64
+	PrevSmoothedHistogram float64
+	PrevHistogram         float64
+}
+
 type IndicatorData struct {
-	Supertrend float64
-	ATR        float64
-	IsUptrend  bool
+	Timestamp         int64
+	Close             float64
+	Supertrend        float64
+	IsUptrend         bool
+	SupertrendFlipped bool
+	EMAFast           float64
+	EMASlow           float64
+	RSI               float64
+	ADX               float64
+	ATR               float64
+	ATRTrailing       float64
+	MACD              MACDData
+	NBarLow           float64
+	NBarHigh          float64
 }
 
 type Cache struct {

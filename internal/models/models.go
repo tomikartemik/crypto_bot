@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 type Candlestick struct {
@@ -15,22 +16,27 @@ type Candlestick struct {
 }
 
 type Position struct {
-	InstId        string
-	PosSide       string
-	TradeSize     float64
-	EntryPrice    float64
-	StopLossPrice float64
+	InstId       string
+	PosSide      string
+	TradeSize    float64
+	EntryPrice   float64
+	EntryTime    time.Time
+	HardSL       float64
+	TPTrigger    float64
+	TrailStop    float64
+	TrailExtreme float64
+	Fees         float64
 }
 
 func (p Position) String() string {
 	return fmt.Sprintf(
-		"Инструмент: %s | Позиция: %s | Размер: %.4f | Цена входа: %.4f | Стоп-лосс: %.4f (%.4f%%)",
+		"Инструмент: %s | Позиция: %s | Размер: %.4f | Цена входа: %.4f | SL: %.4f (%.4f%%)",
 		p.InstId,
 		strings.ToUpper(p.PosSide), // "short" -> "SHORT", "long" -> "LONG"
 		p.TradeSize,
 		p.EntryPrice,
-		p.StopLossPrice,
-		math.Abs((p.StopLossPrice/p.EntryPrice)-1)*100, // Процент от цены входа
+		p.HardSL,
+		math.Abs((p.HardSL/p.EntryPrice)-1)*100, // Процент от цены входа
 	)
 }
 

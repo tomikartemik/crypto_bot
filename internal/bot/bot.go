@@ -61,9 +61,9 @@ func (b *Bot) Run(ctx context.Context) {
 		}
 	}
 
-	interval, err := utils.ParseTimeframe(configs.BotCurrentConfig.Timeframes[0])
+	interval, err := utils.ParseTimeframe(configs.BotCurrentConfig.EntryTimeframe)
 	if err != nil {
-		log.Fatalf("failed to parse timeframe %s: %v", configs.BotCurrentConfig.Timeframes[0], err)
+		log.Fatalf("failed to parse timeframe %s: %v", configs.BotCurrentConfig.EntryTimeframe, err)
 	}
 
 	now := time.Now()
