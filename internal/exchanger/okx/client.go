@@ -127,7 +127,7 @@ func (c *Client) SetLeverage(instId string) error {
 }
 
 func (c *Client) GetTradeSize(instId, ccy string, riskPercent, price float64) (float64, error) {
-	balance, err := getBalance(ccy, c.apiKey, c.passphrase, c.apiSecret)
+	balance, err := c.GetAccountBalance(ccy)
 	if err != nil {
 		return 0, fmt.Errorf("ошибка получения баланса: %w", err)
 	}
@@ -154,4 +154,8 @@ func (c *Client) GetTradeSize(instId, ccy string, riskPercent, price float64) (f
 	}
 
 	return contracts, nil
+}
+
+func (c *Client) GetAccountBalance(ccy string) (float64, error) {
+	return getBalance(ccy, c.apiKey, c.passphrase, c.apiSecret)
 }

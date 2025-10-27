@@ -2,8 +2,8 @@
     "base_url": "https://www.okx.com",
     "candles_amount": 200,
     "timeframe_settings": {
-        "15m": { "atr_period": 10, "multiplier": 2.0 },
-        "30m": { "atr_period": 14, "multiplier": 2.6 }
+        "15m": { "atr_period": 10, "multiplier": 2.2 },
+        "30m": { "atr_period": 14, "multiplier": 2.8 }
     },
     "min_order_size": 0.0,
     "ccy": "USDT",
@@ -14,5 +14,8 @@
     "risk_percent": 0.1,
     "leverage": 10,
     "debug_mode": true,
-    "margin": "cross"
+    "margin": "cross",
+    "telegram_enabled": false,
+    "telegram_bot_token": "",
+    "telegram_chat_id": ""
 }

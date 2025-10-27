@@ -3,6 +3,7 @@ package trader
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tomikartemik/crypto_bot/configs"
@@ -11,6 +12,7 @@ import (
 	"github.com/tomikartemik/crypto_bot/internal/exchanger/okx"
 	"github.com/tomikartemik/crypto_bot/internal/log"
 	"github.com/tomikartemik/crypto_bot/internal/models"
+	"github.com/tomikartemik/crypto_bot/internal/notifier"
 )
 
 type Trader struct {
@@ -193,7 +195,7 @@ func (t *Trader) tradeFor(instId string) error {
 
 	if t.isPositionOpen[instId] && ltfTrend != htfTrend {
 		log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрываем позицию: LTF (%d) != HTF (%d)", t.cfg.APIKey, instId, ltfTrend, htfTrend))
-		t.closePosition(instId)
+		t.closePosition(instId, "расхождение трендов LTF/HTF")
 	}
 
 	aligned := ltfTrend == htfTrend
@@ -237,6 +239,7 @@ func (t *Trader) openLong(instId string, tradeSize, price float64) {
 	t.actedOnTrend[instId] = new(bool)
 	*t.actedOnTrend[instId] = true
 	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
+	t.notifyPositionOpened(instId, "long", tradeSize, price, stopLossPrice)
 }
 
 func (t *Trader) openShort(instId string, tradeSize, price float64) {
@@ -257,6 +260,7 @@ func (t *Trader) openShort(instId string, tradeSize, price float64) {
 	t.actedOnTrend[instId] = new(bool)
 	*t.actedOnTrend[instId] = false
 	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
+	t.notifyPositionOpened(instId, "short", tradeSize, price, stopLossPrice)
 }
 
 func (t *Trader) monitorStop() {
@@ -315,7 +319,7 @@ func (t *Trader) monitorStop() {
 
 		if dir*(price-t.bestStopPrice[instId]) <= 0 {
 			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.bestStopPrice[instId], price))
-			t.closePosition(instId)
+			t.closePosition(instId, "сработал трейлинг-стоп")
 		}
 	}
 }
@@ -338,21 +342,23 @@ func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool)
 	return price * 1.008
 }
 
-func (t *Trader) closePosition(instId string) {
+func (t *Trader) closePosition(instId string, reason string) {
 	if !t.isPositionOpen[instId] {
 		log.Log.Warn(fmt.Sprintf("[Trader %s][%s] closePosition вызван, но позиции нет", t.cfg.APIKey, instId))
 		return
 	}
 
+	position := t.positions[instId]
+
 	side := "sell"
 	dir := 1.0
-	if t.positions[instId].PosSide == "short" {
+	if position.PosSide == "short" {
 		side = "buy"
 		dir = -1
 	}
 
-	entry := t.positions[instId].EntryPrice
-	size := t.positions[instId].TradeSize
+	entry := position.EntryPrice
+	size := position.TradeSize
 
 	price, ok := cache.Get().GetPrice(instId)
 	if !ok {
@@ -361,10 +367,11 @@ func (t *Trader) closePosition(instId string) {
 	}
 
 	pnl := 100.0 * (price - entry) / entry * dir
-	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрытие позиции: PosSide=%s Entry=%.6f Current=%.6f Size=%.6f PnL=%.3f%%", t.cfg.APIKey, instId, t.positions[instId].PosSide, entry, price, size, pnl))
+	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрытие позиции: PosSide=%s Entry=%.6f Current=%.6f Size=%.6f PnL=%.3f%% Reason=%s", t.cfg.APIKey, instId, position.PosSide, entry, price, size, pnl, reason))
 
-	if err := t.Client.PlaceOrder(t.positions[instId].InstId, side, t.positions[instId].PosSide, size); err == nil {
+	if err := t.Client.PlaceOrder(position.InstId, side, position.PosSide, size); err == nil {
 		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId))
+		t.notifyPositionClosed(instId, position.PosSide, size, entry, price, pnl, reason)
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
 		delete(t.bestStopPrice, instId)
@@ -386,7 +393,7 @@ func (t *Trader) NotifyTrendChange(instId string) {
 
 func (t *Trader) Stop() {
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		t.closePosition(instId)
+		t.closePosition(instId, "остановка бота")
 	}
 }
 
@@ -409,4 +416,59 @@ func getHTFTimeframe() (string, bool) {
 		return "", false
 	}
 	return configs.BotCurrentConfig.Timeframes[1], true
+}
+
+func (t *Trader) notifyPositionOpened(instId, posSide string, size, entry, stop float64) {
+	if !t.shouldNotify() {
+		return
+	}
+
+	sideLabel := strings.ToUpper(posSide)
+	message := fmt.Sprintf("*Открытие %s*\nИнструмент: %s\nРазмер: %.4f\nЦена входа: %.6f\nСтоп: %.6f",
+		sideLabel, instId, size, entry, stop)
+
+	if balanceLine, ok := t.balanceLine(); ok {
+		message += "\n" + balanceLine
+	}
+
+	notifier.SendTelegramMessage(message)
+}
+
+func (t *Trader) notifyPositionClosed(instId, posSide string, size, entry, price, pnl float64, reason string) {
+	if !t.shouldNotify() {
+		return
+	}
+
+	sideLabel := strings.ToUpper(posSide)
+	message := fmt.Sprintf("*Закрытие %s*\nИнструмент: %s\nРазмер: %.4f\nEntry: %.6f\nЦена закрытия: %.6f\nPnL: %.3f%%",
+		sideLabel, instId, size, entry, price, pnl)
+
+	if reason != "" {
+		message += "\nПричина: " + reason
+	}
+
+	if balanceLine, ok := t.balanceLine(); ok {
+		message += "\n" + balanceLine
+	}
+
+	notifier.SendTelegramMessage(message)
+}
+
+func (t *Trader) shouldNotify() bool {
+	cfg := configs.BotCurrentConfig
+	return cfg.TelegramEnabled && cfg.TelegramBotToken != "" && cfg.TelegramChatID != ""
+}
+
+func (t *Trader) balanceLine() (string, bool) {
+	balance, err := t.Client.GetAccountBalance(configs.BotCurrentConfig.CCY)
+	if err != nil {
+		log.Log.Error("Не удалось получить баланс для уведомления",
+			"trader", t.cfg.APIKey,
+			"error", err,
+		)
+		return "", false
+	}
+
+	line := fmt.Sprintf("Баланс: %.2f %s", balance, configs.BotCurrentConfig.CCY)
+	return line, true
 }

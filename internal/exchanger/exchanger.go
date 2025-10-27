@@ -16,4 +16,5 @@ type TradingAccount interface {
 	PlaceOrder(instId, side, posSide string, size float64) error
 	GetTradeSize(instId, ccy string, riskPercent, price float64) (float64, error)
 	SetLeverage(instId string) error
+	GetAccountBalance(ccy string) (float64, error)
 }
