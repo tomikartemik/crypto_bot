@@ -3,3 +3,4 @@ dist
 build.sh
 build_windows.bat
 bot.log
+bot_config.json
