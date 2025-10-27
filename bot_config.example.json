@@ -1,0 +1,20 @@
+{
+    "base_url": "https://www.okx.com",
+    "candles_amount": 200,
+    "timeframe_settings": {
+        "30m": { "atr_period": 12, "multiplier": 2.4 },
+        "1H": { "atr_period": 16, "multiplier": 3.0 }
+    },
+    "min_order_size": 0.0,
+    "ccy": "USDT",
+    "is_simulated": false,
+    "trading_pairs": ["ADA-USDT-SWAP", "BNB-USDT-SWAP", "H-USDT-SWAP", "PUMP-USDT-SWAP", "XAN-USDT-SWAP", "SNX-USDT-SWAP", "MAGIC-USDT-SWAP", "LINK-USDT-SWAP", "BIO-USDT-SWAP", "SUI-USDT-SWAP", "WLFI-USDT-SWAP", "TRUMP-USDT-SWAP", "LINEA-USDT-SWAP"],    "atr_multiplier_stop": 3.0,
+    "timeframes": ["30m", "1H"],
+    "risk_percent": 0.1,
+    "leverage": 10,
+    "debug_mode": true,
+    "margin": "cross",
+    "telegram_enabled": true,
+    "telegram_bot_token": "",
+    "telegram_chat_id": ""
+}
