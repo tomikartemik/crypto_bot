@@ -424,7 +424,7 @@ func (t *Trader) notifyPositionOpened(instId, posSide string, size, entry, stop 
 	}
 
 	sideLabel := strings.ToUpper(posSide)
-	message := fmt.Sprintf("*Открытие %s*\nИнструмент: %s\nРазмер: %.4f\nЦена входа: %.6f\nСтоп: %.6f",
+	message := fmt.Sprintf("🔔 *Открыт %s*\n• Инструмент: %s\n• Размер: %.4f\n• Вход: %.6f\n• Стоп: %.6f",
 		sideLabel, instId, size, entry, stop)
 
 	if balanceLine, ok := t.balanceLine(); ok {
@@ -440,11 +440,19 @@ func (t *Trader) notifyPositionClosed(instId, posSide string, size, entry, price
 	}
 
 	sideLabel := strings.ToUpper(posSide)
-	message := fmt.Sprintf("*Закрытие %s*\nИнструмент: %s\nРазмер: %.4f\nEntry: %.6f\nЦена закрытия: %.6f\nPnL: %.3f%%",
-		sideLabel, instId, size, entry, price, pnl)
+	pnlStr := fmt.Sprintf("%+.3f%%", pnl)
+	resultMarker := "⚖️"
+	if pnl > 0 {
+		resultMarker = "✅"
+	} else if pnl < 0 {
+		resultMarker = "❌"
+	}
+
+	message := fmt.Sprintf("%s *Закрыт %s*\n• Инструмент: %s\n• Размер: %.4f\n• Вход: %.6f\n• Выход: %.6f\n• Результат: %s",
+		resultMarker, sideLabel, instId, size, entry, price, pnlStr)
 
 	if reason != "" {
-		message += "\nПричина: " + reason
+		message += "\n• Причина: " + reason
 	}
 
 	if balanceLine, ok := t.balanceLine(); ok {
