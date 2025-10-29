@@ -28,8 +28,23 @@ type BotConfig struct {
 }
 
 type TimeframeSetting struct {
-	ATRPeriod  int     `json:"atr_period"`
-	Multiplier float64 `json:"multiplier"`
+	ATRPeriod    int           `json:"atr_period"`
+	Multiplier   float64       `json:"multiplier"`
+	ExitSettings *ExitSettings `json:"exit_settings,omitempty"`
+}
+
+type ExitSettings struct {
+	InitialSLATR        float64  `json:"initial_sl_atr"`
+	PartialTakeProfitR  float64  `json:"partial_take_profit_r"`
+	PartialClosePercent float64  `json:"partial_close_percent"`
+	TrailingATR         float64  `json:"trailing_atr"`
+	GivebackTriggerR    float64  `json:"giveback_trigger_r"`
+	GivebackAmountR     float64  `json:"giveback_amount_r"`
+	FlipBufferATR       float64  `json:"flip_buffer_atr"`
+	BreakEvenBuffer     float64  `json:"break_even_buffer"`
+	TimeStopUTC         []string `json:"time_stop_utc"`
+	TimeStopHours       float64  `json:"time_stop_hours"`
+	TimeStopMinR        float64  `json:"time_stop_min_r"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {

@@ -22,6 +22,7 @@ type Trader struct {
 	actedOnTrend       map[string]*bool
 	isPositionOpen     map[string]bool
 	positions          map[string]models.Position
+	positionState      map[string]*positionState
 	bestStopPrice      map[string]float64
 	updateCh           chan string
 	trendChangeCh      chan string // Канал для мгновенных уведомлений о смене тренда
@@ -39,6 +40,7 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 		actedOnTrend:       make(map[string]*bool),
 		isPositionOpen:     make(map[string]bool),
 		positions:          make(map[string]models.Position),
+		positionState:      make(map[string]*positionState),
 		bestStopPrice:      make(map[string]float64),
 		updateCh:           make(chan string, 128),
 		trendChangeCh:      make(chan string, 128), // Канал для мгновенных уведомлений о смене тренда
@@ -135,6 +137,8 @@ func (t *Trader) tradeFor(instId string) error {
 		return fmt.Errorf("[Trader %s][%s] Нет LTF данных индикаторов (%s)", t.cfg.APIKey, instId, ltfTF)
 	}
 
+	exitCfg := resolveExitSettingsForTF(ltfTF)
+
 	htfTF, hasHTF := getHTFTimeframe()
 	var htfData cache.IndicatorData
 	if hasHTF {
@@ -198,6 +202,10 @@ func (t *Trader) tradeFor(instId string) error {
 		t.closePosition(instId, "расхождение трендов LTF/HTF")
 	}
 
+	if t.isPositionOpen[instId] {
+		t.manageOpenPosition(instId, price, ltfData, ltfTrend)
+	}
+
 	aligned := ltfTrend == htfTrend
 	if aligned && !t.isPositionOpen[instId] {
 		dirUp := ltfTrend == 1
@@ -208,9 +216,9 @@ func (t *Trader) tradeFor(instId string) error {
 				log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err))
 			} else {
 				if dirUp {
-					t.openLong(instId, tradeSize, price)
+					t.openLong(instId, tradeSize, price, ltfData, exitCfg)
 				} else {
-					t.openShort(instId, tradeSize, price)
+					t.openShort(instId, tradeSize, price, ltfData, exitCfg)
 				}
 			}
 		}
@@ -221,13 +229,130 @@ func (t *Trader) tradeFor(instId string) error {
 	return nil
 }
 
-func (t *Trader) openLong(instId string, tradeSize, price float64) {
-	stopLossPrice := t.calculateStopLoss(instId, price, true)
+func (t *Trader) manageOpenPosition(instId string, price float64, ltfData cache.IndicatorData, ltfTrend int) {
+	state, ok := t.positionState[instId]
+	if !ok || state == nil {
+		return
+	}
+
+	pos := t.positions[instId]
+	exitCfg := state.Exit
+	atr := ltfData.ATR
+
+	if pos.PosSide == "long" {
+		if price > state.MaxPrice {
+			state.MaxPrice = price
+		}
+		if state.MinPrice == 0 || price < state.MinPrice {
+			state.MinPrice = price
+		}
+	} else {
+		if state.MaxPrice == 0 || price > state.MaxPrice {
+			state.MaxPrice = price
+		}
+		if state.MinPrice == 0 || price < state.MinPrice {
+			state.MinPrice = price
+		}
+	}
+
+	// Частичный выход и перевод стопа в безубыток
+	if !state.PartialTaken && exitCfg.PartialTakeProfitR > 0 && state.RiskPerUnit > 0 {
+		target := exitCfg.PartialTakeProfitR * state.RiskPerUnit
+		achieved := false
+		if pos.PosSide == "long" && price-state.EntryPrice >= target {
+			achieved = true
+		}
+		if pos.PosSide == "short" && state.EntryPrice-price >= target {
+			achieved = true
+		}
+		if achieved {
+			if t.partialClose(instId, exitCfg.PartialClosePercent) {
+				state.PartialTaken = true
+				t.moveStopToBreakEven(instId, state)
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Частичное закрытие по правилу +%.2fR", t.cfg.APIKey, instId, exitCfg.PartialTakeProfitR))
+			}
+		}
+	}
+
+	if !t.isPositionOpen[instId] {
+		return
+	}
+
+	// Правило отдачи прибыли
+	if exitCfg.GivebackTriggerR > 0 && exitCfg.GivebackAmountR > 0 && state.RiskPerUnit > 0 {
+		var mfe, giveback float64
+		if pos.PosSide == "long" {
+			mfe = state.MaxPrice - state.EntryPrice
+			giveback = state.MaxPrice - price
+		} else {
+			mfe = state.EntryPrice - state.MinPrice
+			giveback = price - state.MinPrice
+		}
+
+		if mfe >= exitCfg.GivebackTriggerR*state.RiskPerUnit && giveback >= exitCfg.GivebackAmountR*state.RiskPerUnit {
+			t.closePosition(instId, "правило отдачи прибыли")
+			return
+		}
+	}
+
+	// Выход по LTF flip + буферу
+	if atr > 0 && exitCfg.FlipBufferATR > 0 {
+		buffer := atr * exitCfg.FlipBufferATR
+		if pos.PosSide == "long" {
+			if ltfTrend < 0 || price < ltfData.Supertrend-buffer {
+				t.closePosition(instId, "LTF flip + buffer")
+				return
+			}
+		} else {
+			if ltfTrend > 0 || price > ltfData.Supertrend+buffer {
+				t.closePosition(instId, "LTF flip + buffer")
+				return
+			}
+		}
+	} else {
+		if pos.PosSide == "long" && ltfTrend < 0 {
+			t.closePosition(instId, "LTF flip")
+			return
+		}
+		if pos.PosSide == "short" && ltfTrend > 0 {
+			t.closePosition(instId, "LTF flip")
+			return
+		}
+	}
+
+	// Временной стоп
+	if shouldTriggerTimeStop(state, exitCfg.TimeStopUTC) {
+		t.closePosition(instId, "временной стоп")
+		return
+	}
+
+	if exitCfg.TimeStopHours > 0 && exitCfg.TimeStopMinR > 0 && state.RiskPerUnit > 0 {
+		duration := time.Since(state.EntryTime).Hours()
+		var unrealized float64
+		if pos.PosSide == "long" {
+			unrealized = price - state.EntryPrice
+		} else {
+			unrealized = state.EntryPrice - price
+		}
+		if duration >= exitCfg.TimeStopHours && unrealized < exitCfg.TimeStopMinR*state.RiskPerUnit {
+			t.closePosition(instId, fmt.Sprintf("позиция не достигла %.2fR за %.1fч", exitCfg.TimeStopMinR, exitCfg.TimeStopHours))
+			return
+		}
+	}
+}
+
+func (t *Trader) openLong(instId string, tradeSize, price float64, ltfData cache.IndicatorData, exitCfg configs.ExitSettings) {
+	stopLossPrice := t.calculateInitialStop(price, ltfData.ATR, true, exitCfg)
+	riskPerUnit := price - stopLossPrice
+	if riskPerUnit <= 0 {
+		riskPerUnit = price * 0.01
+	}
 	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Попытка открыть LONG: Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice))
 	if err := t.Client.PlaceOrder(instId, "buy", "long", tradeSize); err != nil {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при открытии LONG: %v", t.cfg.APIKey, instId, err))
 		return
 	}
+
 	t.positions[instId] = models.Position{
 		InstId:        instId,
 		PosSide:       "long",
@@ -235,20 +360,29 @@ func (t *Trader) openLong(instId string, tradeSize, price float64) {
 		EntryPrice:    price,
 		StopLossPrice: stopLossPrice,
 	}
+	t.positionState[instId] = newPositionState(price, stopLossPrice, riskPerUnit, exitCfg, "long")
+
 	t.isPositionOpen[instId] = true
+	t.bestStopPrice[instId] = stopLossPrice
 	t.actedOnTrend[instId] = new(bool)
 	*t.actedOnTrend[instId] = true
+
 	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт LONG: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
 	t.notifyPositionOpened(instId, "long", tradeSize, price, stopLossPrice)
 }
 
-func (t *Trader) openShort(instId string, tradeSize, price float64) {
-	stopLossPrice := t.calculateStopLoss(instId, price, false)
+func (t *Trader) openShort(instId string, tradeSize, price float64, ltfData cache.IndicatorData, exitCfg configs.ExitSettings) {
+	stopLossPrice := t.calculateInitialStop(price, ltfData.ATR, false, exitCfg)
+	riskPerUnit := stopLossPrice - price
+	if riskPerUnit <= 0 {
+		riskPerUnit = price * 0.01
+	}
 	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Попытка открыть SHORT: Size=%.6f Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, tradeSize, price, stopLossPrice))
 	if err := t.Client.PlaceOrder(instId, "sell", "short", tradeSize); err != nil {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при открытии SHORT: %v", t.cfg.APIKey, instId, err))
 		return
 	}
+
 	t.positions[instId] = models.Position{
 		InstId:        instId,
 		PosSide:       "short",
@@ -256,11 +390,105 @@ func (t *Trader) openShort(instId string, tradeSize, price float64) {
 		EntryPrice:    price,
 		StopLossPrice: stopLossPrice,
 	}
+	t.positionState[instId] = newPositionState(price, stopLossPrice, riskPerUnit, exitCfg, "short")
+
 	t.isPositionOpen[instId] = true
+	t.bestStopPrice[instId] = stopLossPrice
 	t.actedOnTrend[instId] = new(bool)
 	*t.actedOnTrend[instId] = false
+
 	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Открыт SHORT: Entry=%.6f StopLoss=%.6f", t.cfg.APIKey, instId, price, stopLossPrice))
 	t.notifyPositionOpened(instId, "short", tradeSize, price, stopLossPrice)
+}
+
+func (t *Trader) partialClose(instId string, percent float64) bool {
+	if percent <= 0 || percent >= 1 {
+		return false
+	}
+
+	pos := t.positions[instId]
+	sizeToClose := pos.TradeSize * percent
+	if sizeToClose <= 0 {
+		return false
+	}
+
+	opposite := "sell"
+	if pos.PosSide == "short" {
+		opposite = "buy"
+	}
+
+	if err := t.Client.PlaceOrder(instId, opposite, pos.PosSide, sizeToClose); err != nil {
+		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не удалось частично закрыть позицию: %v", t.cfg.APIKey, instId, err))
+		return false
+	}
+
+	pos.TradeSize -= sizeToClose
+	if pos.TradeSize < 0 {
+		pos.TradeSize = 0
+	}
+	t.positions[instId] = pos
+	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Частично закрыто %.2f%% позиции", t.cfg.APIKey, instId, percent*100))
+	return true
+}
+
+func (t *Trader) moveStopToBreakEven(instId string, state *positionState) {
+	pos := t.positions[instId]
+	buffer := state.Exit.BreakEvenBuffer
+	if buffer < 0 {
+		buffer = 0
+	}
+
+	var newStop float64
+	if pos.PosSide == "long" {
+		newStop = state.EntryPrice + buffer
+		if newStop < state.InitialStop {
+			newStop = state.InitialStop
+		}
+	} else {
+		newStop = state.EntryPrice - buffer
+		if newStop > state.InitialStop {
+			newStop = state.InitialStop
+		}
+	}
+
+	t.bestStopPrice[instId] = newStop
+	pos.StopLossPrice = newStop
+	t.positions[instId] = pos
+	state.InitialStop = newStop
+	state.BreakEvenActivated = true
+
+	log.Log.Info(fmt.Sprintf("[Trader %s][%s] Стоп перенесён в безубыток: %.6f", t.cfg.APIKey, instId, newStop))
+}
+
+func shouldTriggerTimeStop(state *positionState, times []string) bool {
+	if len(times) == 0 {
+		return false
+	}
+
+	now := time.Now().UTC()
+	datePrefix := now.Format("2006-01-02")
+
+	for _, ts := range times {
+		parsed, err := time.Parse("15:04", ts)
+		if err != nil {
+			continue
+		}
+
+		stopTime := time.Date(now.Year(), now.Month(), now.Day(), parsed.Hour(), parsed.Minute(), 0, 0, time.UTC)
+		if now.Before(stopTime) || state.EntryTime.After(stopTime) {
+			continue
+		}
+
+		key := datePrefix + "_" + ts
+		if state.LastTimeStopKey == key {
+			continue
+		}
+
+		state.LastTimeStopKey = key
+		return true
+	}
+
+	return false
 }
 
 func (t *Trader) monitorStop() {
@@ -287,59 +515,94 @@ func (t *Trader) monitorStop() {
 			continue
 		}
 
+		ltfTrend := data.Trend
+		if ltfTrend == 0 {
+			ltfTrend = boolToTrend(data.IsUptrend)
+		}
+
+		t.manageOpenPosition(instId, price, data, ltfTrend)
+		if !t.isPositionOpen[instId] {
+			continue
+		}
+
+		state := t.positionState[instId]
+		if state == nil {
+			continue
+		}
+
 		atr := data.ATR
+		if atr <= 0 {
+			continue
+		}
+
+		trailMultiplier := state.Exit.TrailingATR
+		if trailMultiplier <= 0 {
+			trailMultiplier = configs.BotCurrentConfig.ATRMultiplierStop
+			if trailMultiplier <= 0 {
+				trailMultiplier = 1.5
+			}
+		}
+
+		// До частичного выхода держим исходный стоп
+		if !state.PartialTaken {
+			continue
+		}
+
+		pos := t.positions[instId]
 		dir := 1.0
-		if t.positions[instId].PosSide == "short" {
+		if pos.PosSide == "short" {
 			dir = -1
 		}
 
-		stopDistance := atr * configs.BotCurrentConfig.ATRMultiplierStop
-		newStopPrice := price - dir*stopDistance
-
-		if t.bestStopPrice[instId] == 0 {
-			t.bestStopPrice[instId] = newStopPrice
-			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Инициализация стоп-лосса: %.6f", t.cfg.APIKey, instId, newStopPrice))
-		} else {
-			shouldUpdate := false
-			if t.positions[instId].PosSide == "long" {
-				shouldUpdate = newStopPrice > t.bestStopPrice[instId]
-			} else {
-				shouldUpdate = newStopPrice < t.bestStopPrice[instId]
-			}
-
-			if shouldUpdate {
+		var newStopPrice float64
+		if pos.PosSide == "long" {
+			newStopPrice = price - atr*trailMultiplier
+			if newStopPrice > t.bestStopPrice[instId] {
 				oldStop := t.bestStopPrice[instId]
 				t.bestStopPrice[instId] = newStopPrice
-				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Улучшен стоп-лосс: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
+				pos.StopLossPrice = newStopPrice
+				t.positions[instId] = pos
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Трейлинг стоп поднят: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
+			}
+		} else {
+			newStopPrice = price + atr*trailMultiplier
+			if newStopPrice < t.bestStopPrice[instId] || t.bestStopPrice[instId] == 0 {
+				oldStop := t.bestStopPrice[instId]
+				t.bestStopPrice[instId] = newStopPrice
+				pos.StopLossPrice = newStopPrice
+				t.positions[instId] = pos
+				log.Log.Info(fmt.Sprintf("[Trader %s][%s] Трейлинг стоп опущен: %.6f → %.6f", t.cfg.APIKey, instId, oldStop, newStopPrice))
 			}
 		}
 
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] monitorStop(): time=%s Price=%.6f Entry=%.6f ATR=%.6f PosSide=%s BestStop=%.6f NewStop=%.6f",
-			t.cfg.APIKey, instId, time.Now().Format(time.RFC3339), price, t.positions[instId].EntryPrice, atr, t.positions[instId].PosSide, t.bestStopPrice[instId], newStopPrice))
-
 		if dir*(price-t.bestStopPrice[instId]) <= 0 {
-			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, t.positions[instId].PosSide, t.positions[instId].EntryPrice, t.bestStopPrice[instId], price))
+			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Закрыт %s по стоп-лоссу: Entry=%.6f Stop=%.6f Price=%.6f", t.cfg.APIKey, instId, pos.PosSide, pos.EntryPrice, t.bestStopPrice[instId], price))
 			t.closePosition(instId, "сработал трейлинг-стоп")
 		}
 	}
 }
 
-func (t *Trader) calculateStopLoss(instId string, price float64, isUptrend bool) float64 {
-	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Расчёт стоп-лосса: Price=%.6f IsUptrend=%v", t.cfg.APIKey, instId, price, isUptrend))
-	if ltfTF, hasLTF := getLTFTimeframe(); hasLTF {
-		if data, ok := cache.Get().GetIndicatorData(instId, ltfTF); ok && data.ATR != 0 {
-			stopLossDistance := data.ATR * configs.BotCurrentConfig.ATRMultiplierStop
-			if isUptrend {
-				return price - stopLossDistance
-			}
-			return price + stopLossDistance
+func (t *Trader) calculateInitialStop(price, atr float64, isUptrend bool, exitCfg configs.ExitSettings) float64 {
+	multiplier := exitCfg.InitialSLATR
+	if multiplier <= 0 {
+		multiplier = configs.BotCurrentConfig.ATRMultiplierStop
+		if multiplier <= 0 {
+			multiplier = 1.5
 		}
 	}
 
-	if isUptrend {
-		return price * 0.992
+	if atr <= 0 {
+		if isUptrend {
+			return price * 0.992
+		}
+		return price * 1.008
 	}
-	return price * 1.008
+
+	distance := atr * multiplier
+	if isUptrend {
+		return price - distance
+	}
+	return price + distance
 }
 
 func (t *Trader) closePosition(instId string, reason string) {
@@ -375,7 +638,12 @@ func (t *Trader) closePosition(instId string, reason string) {
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
 		delete(t.bestStopPrice, instId)
-		t.actedOnTrend[instId] = nil
+		delete(t.positionState, instId)
+		if t.actedOnTrend[instId] == nil {
+			t.actedOnTrend[instId] = new(bool)
+		}
+		isLong := position.PosSide == "long"
+		*t.actedOnTrend[instId] = isLong
 	} else {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))
 	}
@@ -393,8 +661,78 @@ func (t *Trader) NotifyTrendChange(instId string) {
 
 func (t *Trader) Stop() {
 	for _, instId := range configs.BotCurrentConfig.TradingPairs {
-		t.closePosition(instId, "остановка бота")
+		if t.isPositionOpen[instId] {
+			t.closePosition(instId, "остановка бота")
+		}
 	}
+}
+
+type positionState struct {
+	Exit               configs.ExitSettings
+	PartialTaken       bool
+	RiskPerUnit        float64
+	EntryPrice         float64
+	InitialStop        float64
+	BreakEvenBuffer    float64
+	BreakEvenActivated bool
+	MaxPrice           float64
+	MinPrice           float64
+	EntryTime          time.Time
+	Side               string
+	LastTimeStopKey    string
+}
+
+func newPositionState(entry, stop, risk float64, exitCfg configs.ExitSettings, side string) *positionState {
+	st := &positionState{
+		Exit:            exitCfg,
+		RiskPerUnit:     risk,
+		EntryPrice:      entry,
+		InitialStop:     stop,
+		BreakEvenBuffer: exitCfg.BreakEvenBuffer,
+		EntryTime:       time.Now().UTC(),
+		Side:            side,
+	}
+
+	st.MaxPrice = entry
+	st.MinPrice = entry
+	return st
+}
+
+func resolveExitSettingsForTF(tf string) configs.ExitSettings {
+	if configs.BotCurrentConfig.TimeframeSettings != nil {
+		if setting, ok := configs.BotCurrentConfig.TimeframeSettings[tf]; ok && setting.ExitSettings != nil {
+			return sanitizeExitSettings(*setting.ExitSettings)
+		}
+	}
+	return sanitizeExitSettings(configs.ExitSettings{})
+}
+
+func sanitizeExitSettings(exitCfg configs.ExitSettings) configs.ExitSettings {
+	if exitCfg.InitialSLATR <= 0 {
+		exitCfg.InitialSLATR = 1.8
+	}
+	if exitCfg.PartialTakeProfitR <= 0 {
+		exitCfg.PartialTakeProfitR = 1.0
+	}
+	if exitCfg.PartialClosePercent <= 0 || exitCfg.PartialClosePercent >= 1 {
+		exitCfg.PartialClosePercent = 0.5
+	}
+	if exitCfg.TrailingATR <= 0 {
+		exitCfg.TrailingATR = 1.6
+	}
+	if exitCfg.GivebackTriggerR <= 0 {
+		exitCfg.GivebackTriggerR = 1.2
+	}
+	if exitCfg.GivebackAmountR <= 0 {
+		exitCfg.GivebackAmountR = 0.6
+	}
+	if exitCfg.FlipBufferATR < 0 {
+		exitCfg.FlipBufferATR = 0
+	}
+	if exitCfg.BreakEvenBuffer < 0 {
+		exitCfg.BreakEvenBuffer = 0
+	}
+	return exitCfg
 }
 
 func boolToTrend(isUp bool) int {
