@@ -211,7 +211,14 @@ func (t *Trader) tradeFor(instId string) error {
 		dirUp := ltfTrend == 1
 		alreadyActed := t.actedOnTrend[instId] != nil && *t.actedOnTrend[instId] == dirUp
 		if ltfChanged || !alreadyActed {
-			tradeSize, err := t.Client.GetTradeSize(instId, "USDT", configs.BotCurrentConfig.RiskPercent, price)
+			riskPercent := configs.BotCurrentConfig.RiskPercent
+			fixedUSDT := configs.BotCurrentConfig.PositionSizeUSDT
+			if riskPercent <= 0 && fixedUSDT <= 0 {
+				log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не задан размер позиции (risk_percent/position_size_usdt)", t.cfg.APIKey, instId))
+				return nil
+			}
+
+			tradeSize, err := t.Client.GetTradeSize(instId, configs.BotCurrentConfig.CCY, riskPercent, fixedUSDT, price)
 			if err != nil {
 				log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err))
 			} else {

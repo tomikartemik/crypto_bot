@@ -126,10 +126,20 @@ func (c *Client) SetLeverage(instId string) error {
 	return nil
 }
 
-func (c *Client) GetTradeSize(instId, ccy string, riskPercent, price float64) (float64, error) {
-	balance, err := c.GetAccountBalance(ccy)
-	if err != nil {
-		return 0, fmt.Errorf("ошибка получения баланса: %w", err)
+func (c *Client) GetTradeSize(instId, ccy string, riskPercent, fixedUSDT, price float64) (float64, error) {
+	var positionSizeUSDT float64
+	if fixedUSDT > 0 {
+		positionSizeUSDT = fixedUSDT
+	} else {
+		balance, err := c.GetAccountBalance(ccy)
+		if err != nil {
+			return 0, fmt.Errorf("ошибка получения баланса: %w", err)
+		}
+		positionSizeUSDT = balance * riskPercent
+	}
+
+	if positionSizeUSDT <= 0 {
+		return 0, fmt.Errorf("position size USDT <= 0")
 	}
 
 	lotSize, ok := cache.Get().GetLotSize(instId)
@@ -142,7 +152,6 @@ func (c *Client) GetTradeSize(instId, ccy string, riskPercent, price float64) (f
 		return 0, fmt.Errorf("ctVal для %s не найден", instId)
 	}
 
-	positionSizeUSDT := balance * riskPercent
 	contracts := positionSizeUSDT / (price * ctVal)
 
 	precision := utils.CountDecimals(lotSize)
