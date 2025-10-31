@@ -667,11 +667,7 @@ func (t *Trader) closePosition(instId string, reason string) {
 		delete(t.positions, instId)
 		delete(t.bestStopPrice, instId)
 		delete(t.positionState, instId)
-		if t.actedOnTrend[instId] == nil {
-			t.actedOnTrend[instId] = new(bool)
-		}
-		isLong := position.PosSide == "long"
-		*t.actedOnTrend[instId] = isLong
+		t.actedOnTrend[instId] = nil
 	} else {
 		log.Log.Error(fmt.Sprintf("[Trader %s][%s] Ошибка при закрытии позиции: %v", t.cfg.APIKey, instId, err))
 	}

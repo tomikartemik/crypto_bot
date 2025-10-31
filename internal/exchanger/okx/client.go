@@ -159,6 +159,14 @@ func (c *Client) GetTradeSize(instId, ccy string, riskPercent, fixedUSDT, price 
 	contracts = math.Floor(contracts*scale) / scale
 
 	if contracts < lotSize {
+		// пробуем округлить вверх до ближайшего доступного лота
+		ceilContracts := math.Ceil((contracts/lotSize)*scale) / scale
+		if ceilContracts >= lotSize {
+			contracts = ceilContracts
+		}
+	}
+
+	if contracts < lotSize {
 		return 0, fmt.Errorf("размер позиции меньше минимального лота")
 	}
 
