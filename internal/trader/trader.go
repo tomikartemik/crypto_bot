@@ -64,11 +64,13 @@ func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 			t.lastIsUptrend[instId] = new(bool)
 			*t.lastIsUptrend[instId] = b
 			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, b))
+			t.actedOnTrend[instId] = new(bool)
+			*t.actedOnTrend[instId] = b
 		} else {
 			t.lastIsUptrend[instId] = nil
 			log.Log.Debug(fmt.Sprintf("[Trader %s][%s] lastIsUptrend оставляем nil (нет данных в кэше)", t.cfg.APIKey, instId))
+			t.actedOnTrend[instId] = nil
 		}
-		t.actedOnTrend[instId] = nil
 	}
 
 	log.Log.Info(fmt.Sprintf("[Trader %s] Выполнение initial trade() для всех пар", t.cfg.APIKey))
@@ -187,6 +189,10 @@ func (t *Trader) tradeFor(instId string) error {
 	if t.lastIsUptrend[instId] == nil {
 		t.lastIsUptrend[instId] = new(bool)
 		*t.lastIsUptrend[instId] = ltfData.IsUptrend
+		if t.actedOnTrend[instId] == nil {
+			t.actedOnTrend[instId] = new(bool)
+		}
+		*t.actedOnTrend[instId] = ltfData.IsUptrend
 		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Первая инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, ltfData.IsUptrend))
 		return nil
 	}
