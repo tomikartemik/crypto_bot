@@ -28,6 +28,7 @@ type Trader struct {
 	trendChangeCh      chan string // Канал для мгновенных уведомлений о смене тренда
 	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
+	statsManager       *StatsManager
 }
 
 func NewTrader(cfg configs.TraderConfig) *Trader {
@@ -51,6 +52,13 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 
 func (t *Trader) Run(ctx context.Context, interval time.Duration) {
 	log.Log.Debug(fmt.Sprintf("[Trader %s] Начало торговли (tf=%s)", t.cfg.APIKey, interval))
+
+	if manager, err := initStatsManager(configs.BotCurrentConfig.StatsFile, configs.BotCurrentConfig.InitialBank); err != nil {
+		log.Log.Error("Не удалось инициализировать статистику", "error", err)
+	} else {
+		t.statsManager = manager
+		t.startDailyReporter(ctx)
+	}
 
 	ltfTF, hasLTF := getLTFTimeframe()
 	if !hasLTF {
@@ -648,6 +656,13 @@ func (t *Trader) closePosition(instId string, reason string) {
 	if err := t.Client.PlaceOrder(position.InstId, side, position.PosSide, size); err == nil {
 		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Позиция закрыта успешно", t.cfg.APIKey, instId))
 		t.notifyPositionClosed(instId, position.PosSide, size, entry, price, pnl, reason)
+		if t.statsManager != nil {
+			if pnl > 0 {
+				t.statsManager.RecordTrade(true)
+			} else if pnl < 0 {
+				t.statsManager.RecordTrade(false)
+			}
+		}
 		t.isPositionOpen[instId] = false
 		delete(t.positions, instId)
 		delete(t.bestStopPrice, instId)
@@ -677,6 +692,60 @@ func (t *Trader) Stop() {
 		if t.isPositionOpen[instId] {
 			t.closePosition(instId, "остановка бота")
 		}
+	}
+}
+
+func (t *Trader) startDailyReporter(ctx context.Context) {
+	if t.statsManager == nil {
+		return
+	}
+
+	loc, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		loc = time.FixedZone("MSK", 3*60*60)
+	}
+
+	ticker := time.NewTicker(time.Minute)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				moscowNow := now.In(loc)
+				if moscowNow.Hour() == 1 && moscowNow.Minute() == 0 {
+					t.sendDailyReport(moscowNow)
+				}
+			}
+		}
+	}()
+}
+
+func (t *Trader) sendDailyReport(now time.Time) {
+	if t.statsManager == nil {
+		return
+	}
+
+	balance, err := t.Client.GetAccountBalance(configs.BotCurrentConfig.CCY)
+	if err != nil {
+		log.Log.Error(fmt.Sprintf("[Trader %s] Не удалось получить баланс для дневного отчёта: %v", t.cfg.APIKey, err))
+		return
+	}
+
+	message, produced, err := t.statsManager.BuildDailyReport(now, balance, configs.BotCurrentConfig.CCY)
+	if err != nil {
+		log.Log.Error(fmt.Sprintf("[Trader %s] Ошибка при подготовке дневного отчёта: %v", t.cfg.APIKey, err))
+		return
+	}
+
+	if !produced || message == "" {
+		return
+	}
+
+	log.Log.Info(fmt.Sprintf("[Trader %s] Дневной отчёт отправлен", t.cfg.APIKey), "balance", balance)
+	if t.shouldNotify() {
+		notifier.SendTelegramMessage(message)
 	}
 }
 

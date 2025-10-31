@@ -18,6 +18,8 @@ type BotConfig struct {
 	CandlesAmount     int                         `json:"candles_amount"`
 	RiskPercent       float64                     `json:"risk_percent"`
 	PositionSizeUSDT  float64                     `json:"position_size_usdt"`
+	InitialBank       float64                     `json:"initial_bank"`
+	StatsFile         string                      `json:"stats_file"`
 	CCY               string                      `json:"ccy"`
 	IsSimulated       bool                        `json:"is_simulated"`
 	Leverage          int                         `json:"leverage"`

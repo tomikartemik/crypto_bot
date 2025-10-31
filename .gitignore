@@ -4,3 +4,4 @@ build.sh
 build_windows.bat
 bot.log
 bot_config.json
+trade_stats.json

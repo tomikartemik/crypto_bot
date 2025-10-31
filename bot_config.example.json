@@ -46,6 +46,8 @@
     "timeframes": ["1H", "4H"],
     "risk_percent": 0.0,
     "position_size_usdt": 100.0,
+    "initial_bank": 50.0,
+    "stats_file": "trade_stats.json",
     "leverage": 10,
     "debug_mode": true,
     "margin": "cross",
