@@ -15,7 +15,8 @@
                 "flip_buffer_atr": 0.1,
                 "break_even_buffer": 0.0005,
                 "time_stop_hours": 12,
-                "time_stop_min_r": 0.5
+                "time_stop_min_r": 0.5,
+                "simple_mode": false
             }
         },
         "4H": {

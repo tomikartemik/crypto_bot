@@ -48,6 +48,7 @@ type ExitSettings struct {
 	TimeStopUTC         []string `json:"time_stop_utc"`
 	TimeStopHours       float64  `json:"time_stop_hours"`
 	TimeStopMinR        float64  `json:"time_stop_min_r"`
+	SimpleMode          bool     `json:"simple_mode"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {
