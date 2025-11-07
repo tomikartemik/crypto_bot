@@ -5,10 +5,14 @@ import (
 )
 
 type IndicatorData struct {
-	Supertrend float64
-	ATR        float64
-	IsUptrend  bool
-	Trend      int
+	Supertrend      float64
+	ATR             float64
+	IsUptrend       bool
+	Trend           int
+	NextResistance  float64
+	NextSupport     float64
+	ResistanceLevel float64
+	SupportLevel    float64
 }
 
 type Cache struct {

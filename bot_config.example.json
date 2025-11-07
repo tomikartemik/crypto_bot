@@ -17,6 +17,18 @@
                 "time_stop_hours": 12,
                 "time_stop_min_r": 0.5,
                 "simple_mode": false
+            },
+            "sr_settings": {
+                "enabled": true,
+                "lookback_bars": 200,
+                "swing_left": 2,
+                "swing_right": 2,
+                "cluster_radius_atr": 0.2,
+                "min_touches": 3,
+                "invalidate_after_bars": 80,
+                "tp_offset_atr": 0.1,
+                "proximity_exit_atr": 0.25,
+                "breakout_buffer_atr": 0.2
             }
         },
         "4H": {

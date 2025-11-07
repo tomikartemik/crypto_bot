@@ -34,6 +34,7 @@ type TimeframeSetting struct {
 	ATRPeriod    int           `json:"atr_period"`
 	Multiplier   float64       `json:"multiplier"`
 	ExitSettings *ExitSettings `json:"exit_settings,omitempty"`
+	SRSettings   *SRSettings   `json:"sr_settings,omitempty"`
 }
 
 type ExitSettings struct {
@@ -49,6 +50,19 @@ type ExitSettings struct {
 	TimeStopHours       float64  `json:"time_stop_hours"`
 	TimeStopMinR        float64  `json:"time_stop_min_r"`
 	SimpleMode          bool     `json:"simple_mode"`
+}
+
+type SRSettings struct {
+	Enabled             bool    `json:"enabled"`
+	LookbackBars        int     `json:"lookback_bars"`
+	SwingLeft           int     `json:"swing_left"`
+	SwingRight          int     `json:"swing_right"`
+	ClusterRadiusATR    float64 `json:"cluster_radius_atr"`
+	MinTouches          int     `json:"min_touches"`
+	InvalidateAfterBars int     `json:"invalidate_after_bars"`
+	TpOffsetATR         float64 `json:"tp_offset_atr"`
+	ProximityExitATR    float64 `json:"proximity_exit_atr"`
+	BreakoutBufferATR   float64 `json:"breakout_buffer_atr"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {

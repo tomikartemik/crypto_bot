@@ -66,11 +66,24 @@ func (b *Bot) strategyUpdater(ctx context.Context, interval time.Duration, instr
 					}
 				}
 
+				srSupportTarget, srSupportLevel, srResistanceTarget, srResistanceLevel := 0.0, 0.0, 0.0, 0.0
+				if srCfg, ok := configs.GetSRSettings(tf); ok && srCfg.Enabled {
+					stSupport, stSupportLevel, stResistance, stResistanceLevel := indicators.CalculateSRLevels(candles, atr, srCfg)
+					srSupportTarget = stSupport
+					srSupportLevel = stSupportLevel
+					srResistanceTarget = stResistance
+					srResistanceLevel = stResistanceLevel
+				}
+
 				cache.Get().SetIndicatorData(instId, tf, cache.IndicatorData{
-					Supertrend: stResult.Value,
-					ATR:        atr,
-					IsUptrend:  stResult.IsUptrend,
-					Trend:      stResult.Trend,
+					Supertrend:      stResult.Value,
+					ATR:             atr,
+					IsUptrend:       stResult.IsUptrend,
+					Trend:           stResult.Trend,
+					NextResistance:  srResistanceTarget,
+					NextSupport:     srSupportTarget,
+					ResistanceLevel: srResistanceLevel,
+					SupportLevel:    srSupportLevel,
 				})
 			}
 		}

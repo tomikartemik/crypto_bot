@@ -147,7 +147,11 @@ func (t *Trader) tradeFor(instId string) error {
 		return fmt.Errorf("[Trader %s][%s] Нет LTF данных индикаторов (%s)", t.cfg.APIKey, instId, ltfTF)
 	}
 
-	exitCfg := resolveExitSettingsForTF(ltfTF)
+	exitCfg, okExit := configs.GetExitSettings(ltfTF)
+	if !okExit {
+		exitCfg = configs.SanitizeExitSettings(configs.ExitSettings{})
+	}
+	srCfg, _ := configs.GetSRSettings(ltfTF)
 
 	htfTF, hasHTF := getHTFTimeframe()
 	var htfData cache.IndicatorData
@@ -237,9 +241,9 @@ func (t *Trader) tradeFor(instId string) error {
 				log.Log.Error(fmt.Sprintf("[Trader %s][%s] Не удалось получить tradeSize: %v", t.cfg.APIKey, instId, err))
 			} else {
 				if dirUp {
-					t.openLong(instId, tradeSize, price, ltfData, exitCfg)
+					t.openLong(instId, tradeSize, price, ltfData, exitCfg, srCfg)
 				} else {
-					t.openShort(instId, tradeSize, price, ltfData, exitCfg)
+					t.openShort(instId, tradeSize, price, ltfData, exitCfg, srCfg)
 				}
 			}
 		}
@@ -258,7 +262,9 @@ func (t *Trader) manageOpenPosition(instId string, price float64, ltfData cache.
 
 	pos := t.positions[instId]
 	exitCfg := state.Exit
+	srCfg := state.SR
 	atr := ltfData.ATR
+	simpleMode := exitCfg.SimpleMode
 
 	if pos.PosSide == "long" {
 		if price > state.MaxPrice {
@@ -276,47 +282,76 @@ func (t *Trader) manageOpenPosition(instId string, price float64, ltfData cache.
 		}
 	}
 
-	// Частичный выход и перевод стопа в безубыток
-    simpleMode := exitCfg.SimpleMode
-
-    if !simpleMode && exitCfg.PartialTakeProfitR > 0 && state.RiskPerUnit > 0 && !state.BreakEvenActivated {
-        target := exitCfg.PartialTakeProfitR * state.RiskPerUnit
-        achieved := false
-        if pos.PosSide == "long" && price-state.EntryPrice >= target {
-            achieved = true
-        }
-        if pos.PosSide == "short" && state.EntryPrice-price >= target {
-            achieved = true
-        }
-        if achieved {
-            t.moveStopToBreakEven(instId, state)
-            log.Log.Info(fmt.Sprintf("[Trader %s][%s] Стоп перенесён в безубыток по правилу +%.2fR", t.cfg.APIKey, instId, exitCfg.PartialTakeProfitR))
-        }
-    }
-
-    if !t.isPositionOpen[instId] {
-        return
-    }
-
-    // Правило отдачи прибыли (только для расширенного режима)
-    if !simpleMode && exitCfg.GivebackTriggerR > 0 && exitCfg.GivebackAmountR > 0 && state.RiskPerUnit > 0 {
-        var mfe, giveback float64
-        if pos.PosSide == "long" {
-            mfe = state.MaxPrice - state.EntryPrice
-            giveback = state.MaxPrice - price
-        } else {
-			mfe = state.EntryPrice - state.MinPrice
-			giveback = price - state.MinPrice
+	var pnlR float64
+	if state.RiskPerUnit > 0 {
+		if pos.PosSide == "long" {
+			pnlR = (price - state.EntryPrice) / state.RiskPerUnit
+		} else {
+			pnlR = (state.EntryPrice - price) / state.RiskPerUnit
 		}
+	}
 
-		if mfe >= exitCfg.GivebackTriggerR*state.RiskPerUnit && giveback >= exitCfg.GivebackAmountR*state.RiskPerUnit {
+	if !simpleMode && exitCfg.PartialTakeProfitR > 0 && state.RiskPerUnit > 0 && !state.BreakEvenActivated {
+		if pnlR >= exitCfg.PartialTakeProfitR {
+			t.moveStopToBreakEven(instId, state)
+			log.Log.Info(fmt.Sprintf("[Trader %s][%s] Стоп перенесён в безубыток по правилу +%.2fR", t.cfg.APIKey, instId, exitCfg.PartialTakeProfitR))
+		}
+	}
+
+	if !t.isPositionOpen[instId] {
+		return
+	}
+
+	if srCfg.Enabled && atr > 0 {
+		if pos.PosSide == "long" {
+			if state.SRTarget > 0 && price >= state.SRTarget {
+				t.closePosition(instId, "достигнут уровень сопротивления")
+				return
+			}
+			if state.SRLevel > 0 {
+				if srCfg.ProximityExitATR > 0 && state.SRLevel-price <= srCfg.ProximityExitATR*atr {
+					t.closePosition(instId, "подход к сопротивлению")
+					return
+				}
+				if srCfg.BreakoutBufferATR > 0 && price > state.SRLevel+srCfg.BreakoutBufferATR*atr {
+					state.SRTarget = 0
+					state.SRLevel = 0
+				}
+			}
+		} else {
+			if state.SRTarget > 0 && price <= state.SRTarget {
+				t.closePosition(instId, "достигнут уровень поддержки")
+				return
+			}
+			if state.SRLevel > 0 {
+				if srCfg.ProximityExitATR > 0 && price-state.SRLevel <= srCfg.ProximityExitATR*atr {
+					t.closePosition(instId, "подход к поддержке")
+					return
+				}
+				if srCfg.BreakoutBufferATR > 0 && price < state.SRLevel-srCfg.BreakoutBufferATR*atr {
+					state.SRTarget = 0
+					state.SRLevel = 0
+				}
+			}
+		}
+	}
+
+	if !simpleMode && exitCfg.GivebackTriggerR > 0 && exitCfg.GivebackAmountR > 0 && state.RiskPerUnit > 0 {
+		var mfeR, givebackR float64
+		if pos.PosSide == "long" {
+			mfeR = (state.MaxPrice - state.EntryPrice) / state.RiskPerUnit
+			givebackR = (state.MaxPrice - price) / state.RiskPerUnit
+		} else {
+			mfeR = (state.EntryPrice - state.MinPrice) / state.RiskPerUnit
+			givebackR = (price - state.MinPrice) / state.RiskPerUnit
+		}
+		if mfeR >= exitCfg.GivebackTriggerR && givebackR >= exitCfg.GivebackAmountR {
 			t.closePosition(instId, "правило отдачи прибыли")
 			return
-        }
-    }
+		}
+	}
 
-    // Выход по LTF flip + буферу
-    if atr > 0 && exitCfg.FlipBufferATR > 0 {
+	if atr > 0 && exitCfg.FlipBufferATR > 0 {
 		buffer := atr * exitCfg.FlipBufferATR
 		if pos.PosSide == "long" {
 			if ltfTrend < 0 || price < ltfData.Supertrend-buffer {
@@ -337,35 +372,28 @@ func (t *Trader) manageOpenPosition(instId string, price float64, ltfData cache.
 		if pos.PosSide == "short" && ltfTrend > 0 {
 			t.closePosition(instId, "LTF flip")
 			return
-        }
-    }
+		}
+	}
 
-    if simpleMode {
-        return
-    }
+	if simpleMode {
+		return
+	}
 
-    // Временной стоп
-    if shouldTriggerTimeStop(state, exitCfg.TimeStopUTC) {
-        t.closePosition(instId, "временной стоп")
-        return
-    }
+	if shouldTriggerTimeStop(state, exitCfg.TimeStopUTC) {
+		t.closePosition(instId, "временной стоп")
+		return
+	}
 
-    if exitCfg.TimeStopHours > 0 && exitCfg.TimeStopMinR > 0 && state.RiskPerUnit > 0 {
-        duration := time.Since(state.EntryTime).Hours()
-        var unrealized float64
-        if pos.PosSide == "long" {
-            unrealized = price - state.EntryPrice
-        } else {
-            unrealized = state.EntryPrice - price
-        }
-        if duration >= exitCfg.TimeStopHours && unrealized < exitCfg.TimeStopMinR*state.RiskPerUnit {
-            t.closePosition(instId, fmt.Sprintf("позиция не достигла %.2fR за %.1fч", exitCfg.TimeStopMinR, exitCfg.TimeStopHours))
-            return
-        }
-    }
+	if exitCfg.TimeStopHours > 0 && exitCfg.TimeStopMinR > 0 && state.RiskPerUnit > 0 {
+		duration := time.Since(state.EntryTime).Hours()
+		if duration >= exitCfg.TimeStopHours && pnlR < exitCfg.TimeStopMinR {
+			t.closePosition(instId, fmt.Sprintf("позиция не достигла %.2fR за %.1fч", exitCfg.TimeStopMinR, exitCfg.TimeStopHours))
+			return
+		}
+	}
 }
 
-func (t *Trader) openLong(instId string, tradeSize, price float64, ltfData cache.IndicatorData, exitCfg configs.ExitSettings) {
+func (t *Trader) openLong(instId string, tradeSize, price float64, ltfData cache.IndicatorData, exitCfg configs.ExitSettings, srCfg configs.SRSettings) {
 	stopLossPrice := t.calculateInitialStop(price, ltfData.ATR, true, exitCfg)
 	riskPerUnit := price - stopLossPrice
 	if riskPerUnit <= 0 {
@@ -384,7 +412,7 @@ func (t *Trader) openLong(instId string, tradeSize, price float64, ltfData cache
 		EntryPrice:    price,
 		StopLossPrice: stopLossPrice,
 	}
-	t.positionState[instId] = newPositionState(price, stopLossPrice, riskPerUnit, exitCfg, "long")
+	t.positionState[instId] = newPositionState(price, stopLossPrice, riskPerUnit, exitCfg, srCfg, ltfData.NextResistance, ltfData.ResistanceLevel, "long")
 
 	t.isPositionOpen[instId] = true
 	t.bestStopPrice[instId] = stopLossPrice
@@ -395,7 +423,7 @@ func (t *Trader) openLong(instId string, tradeSize, price float64, ltfData cache
 	t.notifyPositionOpened(instId, "long", tradeSize, price, stopLossPrice)
 }
 
-func (t *Trader) openShort(instId string, tradeSize, price float64, ltfData cache.IndicatorData, exitCfg configs.ExitSettings) {
+func (t *Trader) openShort(instId string, tradeSize, price float64, ltfData cache.IndicatorData, exitCfg configs.ExitSettings, srCfg configs.SRSettings) {
 	stopLossPrice := t.calculateInitialStop(price, ltfData.ATR, false, exitCfg)
 	riskPerUnit := stopLossPrice - price
 	if riskPerUnit <= 0 {
@@ -414,7 +442,7 @@ func (t *Trader) openShort(instId string, tradeSize, price float64, ltfData cach
 		EntryPrice:    price,
 		StopLossPrice: stopLossPrice,
 	}
-	t.positionState[instId] = newPositionState(price, stopLossPrice, riskPerUnit, exitCfg, "short")
+	t.positionState[instId] = newPositionState(price, stopLossPrice, riskPerUnit, exitCfg, srCfg, ltfData.NextSupport, ltfData.SupportLevel, "short")
 
 	t.isPositionOpen[instId] = true
 	t.bestStopPrice[instId] = stopLossPrice
@@ -719,6 +747,7 @@ func (t *Trader) sendDailyReport(now time.Time) {
 
 type positionState struct {
 	Exit               configs.ExitSettings
+	SR                 configs.SRSettings
 	RiskPerUnit        float64
 	EntryPrice         float64
 	InitialStop        float64
@@ -729,67 +758,27 @@ type positionState struct {
 	EntryTime          time.Time
 	Side               string
 	LastTimeStopKey    string
+	SRTarget           float64
+	SRLevel            float64
 }
 
-func newPositionState(entry, stop, risk float64, exitCfg configs.ExitSettings, side string) *positionState {
+func newPositionState(entry, stop, risk float64, exitCfg configs.ExitSettings, srCfg configs.SRSettings, srTarget, srLevel float64, side string) *positionState {
 	st := &positionState{
 		Exit:            exitCfg,
+		SR:              srCfg,
 		RiskPerUnit:     risk,
 		EntryPrice:      entry,
 		InitialStop:     stop,
 		BreakEvenBuffer: exitCfg.BreakEvenBuffer,
 		EntryTime:       time.Now().UTC(),
 		Side:            side,
+		SRTarget:        srTarget,
+		SRLevel:         srLevel,
 	}
 
 	st.MaxPrice = entry
 	st.MinPrice = entry
 	return st
-}
-
-func resolveExitSettingsForTF(tf string) configs.ExitSettings {
-	if configs.BotCurrentConfig.TimeframeSettings != nil {
-		if setting, ok := configs.BotCurrentConfig.TimeframeSettings[tf]; ok && setting.ExitSettings != nil {
-			return sanitizeExitSettings(*setting.ExitSettings)
-		}
-	}
-	return sanitizeExitSettings(configs.ExitSettings{})
-}
-
-func sanitizeExitSettings(exitCfg configs.ExitSettings) configs.ExitSettings {
-	if exitCfg.InitialSLATR <= 0 {
-		exitCfg.InitialSLATR = 1.8
-	}
-	if exitCfg.SimpleMode {
-		exitCfg.PartialTakeProfitR = 0
-		exitCfg.TrailingATR = 0
-		exitCfg.GivebackTriggerR = 0
-		exitCfg.GivebackAmountR = 0
-		exitCfg.TimeStopUTC = nil
-		exitCfg.TimeStopHours = 0
-		exitCfg.TimeStopMinR = 0
-		exitCfg.BreakEvenBuffer = 0
-	} else {
-		if exitCfg.PartialTakeProfitR <= 0 {
-			exitCfg.PartialTakeProfitR = 1.0
-		}
-		if exitCfg.TrailingATR <= 0 {
-			exitCfg.TrailingATR = 1.6
-		}
-		if exitCfg.GivebackTriggerR <= 0 {
-			exitCfg.GivebackTriggerR = 1.2
-		}
-		if exitCfg.GivebackAmountR <= 0 {
-			exitCfg.GivebackAmountR = 0.6
-		}
-		if exitCfg.BreakEvenBuffer < 0 {
-			exitCfg.BreakEvenBuffer = 0
-		}
-	}
-	if exitCfg.FlipBufferATR < 0 {
-		exitCfg.FlipBufferATR = 0
-	}
-	return exitCfg
 }
 
 func boolToTrend(isUp bool) int {
