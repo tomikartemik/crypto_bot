@@ -29,6 +29,12 @@
                 "tp_offset_atr": 0.1,
                 "proximity_exit_atr": 0.25,
                 "breakout_buffer_atr": 0.2
+            },
+            "flip_guard": {
+                "enabled": true,
+                "confirm_candles": 1,
+                "cooldown_minutes": 10,
+                "min_move_atr": 0.15
             }
         },
         "4H": {

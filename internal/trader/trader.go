@@ -3,6 +3,7 @@ package trader
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ type Trader struct {
 	lastIndicatorAt    map[string]time.Time
 	trendChangeCounter map[string]int
 	statsManager       *StatsManager
+	flipState          map[string]*flipState
 }
 
 func NewTrader(cfg configs.TraderConfig) *Trader {
@@ -47,6 +49,7 @@ func NewTrader(cfg configs.TraderConfig) *Trader {
 		trendChangeCh:      make(chan string, 128), // Канал для мгновенных уведомлений о смене тренда
 		lastIndicatorAt:    make(map[string]time.Time),
 		trendChangeCounter: make(map[string]int),
+		flipState:          make(map[string]*flipState),
 	}
 }
 
@@ -170,9 +173,33 @@ func (t *Trader) tradeFor(instId string) error {
 		return fmt.Errorf("[Trader %s][%s] Нет актуальной цены в кэше — пропуск шага", t.cfg.APIKey, instId)
 	}
 
-	ltfTrend := ltfData.Trend
-	if ltfTrend == 0 {
-		ltfTrend = boolToTrend(ltfData.IsUptrend)
+	actualTrend := ltfData.IsUptrend
+
+	if t.lastIsUptrend[instId] == nil {
+		t.lastIsUptrend[instId] = new(bool)
+		*t.lastIsUptrend[instId] = actualTrend
+		if t.actedOnTrend[instId] == nil {
+			t.actedOnTrend[instId] = new(bool)
+		}
+		*t.actedOnTrend[instId] = actualTrend
+		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Первая инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, actualTrend))
+		return nil
+	}
+
+	prevTrend := *t.lastIsUptrend[instId]
+	effectiveTrend := actualTrend
+	now := time.Now()
+
+	if flipCfg, ok := configs.GetFlipGuardSettings(ltfTF); ok && flipCfg.Enabled {
+		effectiveTrend = t.evaluateFlipGuard(instId, prevTrend, actualTrend, price, ltfData.ATR, flipCfg, now)
+	} else if state, exists := t.flipState[instId]; exists {
+		state.pending = false
+		state.confirmCount = 0
+	}
+
+	ltfTrend := 1
+	if !effectiveTrend {
+		ltfTrend = -1
 	}
 	htfTrend := htfData.Trend
 	if htfTrend == 0 {
@@ -184,35 +211,24 @@ func (t *Trader) tradeFor(instId string) error {
 		htfLabel = htfTF
 	}
 
-	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] tradeFor(): time=%s Price=%.6f LTF[%s]=%d HTF[%s]=%d SupertrendLTF=%.6f SupertrendHTF=%.6f",
+	log.Log.Debug(fmt.Sprintf("[Trader %s][%s] tradeFor(): time=%s Price=%.6f LTF[%s]=%d(actual:%v) HTF[%s]=%d SupertrendLTF=%.6f SupertrendHTF=%.6f",
 		t.cfg.APIKey,
 		instId,
-		time.Now().Format(time.RFC3339),
+		now.Format(time.RFC3339),
 		price,
 		ltfTF,
 		ltfTrend,
+		actualTrend,
 		htfLabel,
 		htfTrend,
 		ltfData.Supertrend,
 		htfData.Supertrend,
 	))
-	t.lastIndicatorAt[instId] = time.Now()
+	t.lastIndicatorAt[instId] = now
 
-	if t.lastIsUptrend[instId] == nil {
-		t.lastIsUptrend[instId] = new(bool)
-		*t.lastIsUptrend[instId] = ltfData.IsUptrend
-		if t.actedOnTrend[instId] == nil {
-			t.actedOnTrend[instId] = new(bool)
-		}
-		*t.actedOnTrend[instId] = ltfData.IsUptrend
-		log.Log.Debug(fmt.Sprintf("[Trader %s][%s] Первая инициализация lastIsUptrend=%v", t.cfg.APIKey, instId, ltfData.IsUptrend))
-		return nil
-	}
-
-	prevLTF := *t.lastIsUptrend[instId]
-	ltfChanged := prevLTF != ltfData.IsUptrend
+	ltfChanged := prevTrend != effectiveTrend
 	if ltfChanged {
-		log.Log.Info(fmt.Sprintf("[Trader %s][%s] LTF сменил направление: было %v → стало %v", t.cfg.APIKey, instId, prevLTF, ltfData.IsUptrend))
+		log.Log.Info(fmt.Sprintf("[Trader %s][%s] LTF подтверждено сменил направление: было %v → стало %v (actual=%v)", t.cfg.APIKey, instId, prevTrend, effectiveTrend, actualTrend))
 	}
 
 	if t.isPositionOpen[instId] && ltfTrend != htfTrend {
@@ -249,7 +265,7 @@ func (t *Trader) tradeFor(instId string) error {
 		}
 	}
 
-	*t.lastIsUptrend[instId] = ltfData.IsUptrend
+	*t.lastIsUptrend[instId] = effectiveTrend
 	t.lastIndicatorAt[instId] = time.Now()
 	return nil
 }
@@ -779,6 +795,64 @@ func newPositionState(entry, stop, risk float64, exitCfg configs.ExitSettings, s
 	st.MaxPrice = entry
 	st.MinPrice = entry
 	return st
+}
+
+type flipState struct {
+	pending        bool
+	pendingTrend   bool
+	confirmCount   int
+	referencePrice float64
+	cooldownUntil  time.Time
+}
+
+func (t *Trader) evaluateFlipGuard(instId string, prevTrend, currTrend bool, price, atr float64, cfg configs.FlipGuardSettings, now time.Time) bool {
+	state := t.flipState[instId]
+	if state == nil {
+		state = &flipState{}
+		t.flipState[instId] = state
+	}
+
+	if currTrend == prevTrend {
+		state.pending = false
+		state.confirmCount = 0
+		return currTrend
+	}
+
+	if cfg.CooldownMinutes > 0 && state.cooldownUntil.After(now) {
+		return prevTrend
+	}
+
+	if !state.pending || state.pendingTrend != currTrend {
+		state.pending = true
+		state.pendingTrend = currTrend
+		state.confirmCount = 0
+		state.referencePrice = price
+		return prevTrend
+	}
+
+	state.confirmCount++
+	confirmCandles := cfg.ConfirmCandles
+	if confirmCandles <= 0 {
+		confirmCandles = 1
+	}
+	movedEnough := cfg.MinMoveATR <= 0 || atr <= 0 || math.Abs(price-state.referencePrice) >= cfg.MinMoveATR*atr
+	if state.confirmCount >= confirmCandles && movedEnough {
+		state.pending = false
+		state.confirmCount = 0
+		if cfg.CooldownMinutes > 0 {
+			state.cooldownUntil = now.Add(time.Duration(cfg.CooldownMinutes) * time.Minute)
+		}
+		return currTrend
+	}
+
+	return prevTrend
+}
+
+func (t *Trader) resetFlipState(instId string) {
+	if state, ok := t.flipState[instId]; ok {
+		state.pending = false
+		state.confirmCount = 0
+	}
 }
 
 func boolToTrend(isUp bool) int {

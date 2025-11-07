@@ -31,10 +31,11 @@ type BotConfig struct {
 }
 
 type TimeframeSetting struct {
-	ATRPeriod    int           `json:"atr_period"`
-	Multiplier   float64       `json:"multiplier"`
-	ExitSettings *ExitSettings `json:"exit_settings,omitempty"`
-	SRSettings   *SRSettings   `json:"sr_settings,omitempty"`
+	ATRPeriod    int                `json:"atr_period"`
+	Multiplier   float64            `json:"multiplier"`
+	ExitSettings *ExitSettings      `json:"exit_settings,omitempty"`
+	SRSettings   *SRSettings        `json:"sr_settings,omitempty"`
+	FlipGuard    *FlipGuardSettings `json:"flip_guard,omitempty"`
 }
 
 type ExitSettings struct {
@@ -63,6 +64,13 @@ type SRSettings struct {
 	TpOffsetATR         float64 `json:"tp_offset_atr"`
 	ProximityExitATR    float64 `json:"proximity_exit_atr"`
 	BreakoutBufferATR   float64 `json:"breakout_buffer_atr"`
+}
+
+type FlipGuardSettings struct {
+	Enabled         bool    `json:"enabled"`
+	ConfirmCandles  int     `json:"confirm_candles"`
+	CooldownMinutes int     `json:"cooldown_minutes"`
+	MinMoveATR      float64 `json:"min_move_atr"`
 }
 
 func LoadBotConfig(filename string) (BotConfig, error) {

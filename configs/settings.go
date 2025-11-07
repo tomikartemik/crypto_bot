@@ -82,3 +82,30 @@ func SanitizeSRSettings(srCfg SRSettings) SRSettings {
 	}
 	return srCfg
 }
+
+func GetFlipGuardSettings(tf string) (FlipGuardSettings, bool) {
+	if BotCurrentConfig.TimeframeSettings == nil {
+		return FlipGuardSettings{}, false
+	}
+	setting, ok := BotCurrentConfig.TimeframeSettings[tf]
+	if !ok || setting.FlipGuard == nil {
+		return FlipGuardSettings{}, false
+	}
+	return SanitizeFlipGuardSettings(*setting.FlipGuard), true
+}
+
+func SanitizeFlipGuardSettings(cfg FlipGuardSettings) FlipGuardSettings {
+	if cfg.ConfirmCandles < 0 {
+		cfg.ConfirmCandles = 0
+	}
+	if cfg.ConfirmCandles == 0 {
+		cfg.ConfirmCandles = 1
+	}
+	if cfg.CooldownMinutes < 0 {
+		cfg.CooldownMinutes = 0
+	}
+	if cfg.MinMoveATR < 0 {
+		cfg.MinMoveATR = 0
+	}
+	return cfg
+}
